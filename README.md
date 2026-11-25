@@ -1628,6 +1628,7 @@ Hold a button (in the emulator: right-click or shift-click to latch it) and the 
 | **REC** | SEQ | The SEQ pages' keys play notes (not recording), or are steps again |
 | **REC** | SAVE | TAKE: the last loop you played goes into the steps (on a CHANCE page: the phrase does) |
 | **REC** | OCT− / OCT+ | On a CHANCE page: a new phrase / three steps decided again |
+| **EDIT** | OCT− / OCT+ | Undo / redo the last change to the steps on screen (a recording pass, a step edit, a lock, a EUCLID write, a paste or a clear is one change). Kept: the last 64 changed steps; a new project starts afresh. Not covered: a pattern's length, kit locks, other tracks |
 
 <p align="center"><img src="docs/manual/hold-seq.png" alt="SEQ held: steps on any page" width="240"> <img src="docs/manual/hold-fx.png" alt="FX held: the punch-ins" width="240"></p>
 

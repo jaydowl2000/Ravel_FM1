@@ -793,6 +793,121 @@ static int held_step(void)
     return -1;
 }
 
+/* ------------------------------------------------------------- undo --- */
+/* EDIT + OCT- undoes, EDIT + OCT+ redoes the last change to the steps of the pattern on screen
+ * (a recording pass, a step edit, a lock, a EUCLID write, a paste, a clear: one gesture, one undo).
+ *
+ * Ravel edits steps in many places, so nothing here hooks them: every frame the pattern on screen is
+ * compared with a copy of itself (undo_shadow), and the steps that changed go into a log with what they
+ * were. Changes less than UNDO_GAP_MS apart (or a held note, a turned knob) are one gesture. The log
+ * keeps only the steps that changed (22 bytes each: 64 of them are 1.4 KB), so a long history costs little RAM.
+ *
+ * Undo and redo swap in place: the log is a line of gestures, those before undo_cur can be undone and
+ * those from undo_cur on redone; each entry holds "the other" value of its step, so both ways are the
+ * same swap. A new edit drops what could still be redone.
+ * Not covered: a pattern's length, kit locks, other tracks than the one on screen. */
+#define UNDO_N 64                                 /* changed steps kept (22 bytes each): the RAM it costs */
+#define UNDO_GAP_MS 700                           /* a pause this long ends a gesture */
+typedef struct {
+    uint8_t tp;                                   /* track << 4 | pattern */
+    uint8_t si;                                   /* the step */
+    uint8_t grp;                                  /* the gesture: entries of one gesture are side by side */
+    rv_step st;                                   /* the step as it was (or, once undone, as it will be) */
+} undo_e;
+static undo_e undo_log[UNDO_N] RV_RAMBSS;
+static rv_step undo_shadow[RV_STEPS] RV_RAMBSS;   /* the pattern on screen as it was last frame */
+static uint16_t undo_n, undo_cur;                 /* entries in the log; entries that can be undone */
+static uint8_t undo_grp;                          /* the newest gesture's number */
+static int8_t undo_t = -1, undo_p;                /* which pattern the shadow is of (-1: none yet) */
+static uint32_t undo_last_ms;                     /* when the last change was seen */
+
+static rv_step *undo_pat(int tp) { return rv.pat[tp >> 4][tp & 15].s; }
+
+static void undo_drop_oldest(void)                /* the whole oldest gesture, never half of one */
+{
+    uint16_t k = 1;
+    while (k < undo_n && undo_log[k].grp == undo_log[0].grp)
+        k++;
+    __builtin_memmove(undo_log, undo_log + k, (undo_n - k) * sizeof(undo_e));
+    undo_n = (uint16_t)(undo_n - k);
+    undo_cur = undo_cur > k ? (uint16_t)(undo_cur - k) : 0;
+}
+
+/* once a frame: see what changed on the pattern on screen and log it */
+static void undo_watch(void)
+{
+    int t = ui.track, p = rv.pat_cur[t] % RV_PATTERNS, i;
+    const rv_step *cur = rv.pat[t][p].s;
+    uint32_t ms = plat_ms();
+    int fresh_group;
+    if (undo_t != t || undo_p != p) {             /* another pattern on screen: start from how it is */
+        __builtin_memcpy(undo_shadow, cur, sizeof undo_shadow);
+        undo_t = (int8_t)t;
+        undo_p = (int8_t)p;
+        return;
+    }
+    if (!__builtin_memcmp(undo_shadow, cur, sizeof undo_shadow))
+        return;
+    fresh_group = undo_cur == 0 || ms - undo_last_ms > UNDO_GAP_MS || undo_log[undo_cur - 1].tp != (uint8_t)((t << 4) | p);
+    undo_last_ms = ms;
+    if (undo_cur < undo_n)                        /* an edit drops what could have been redone */
+        undo_n = undo_cur;
+    if (fresh_group)
+        undo_grp++;
+    for (i = 0; i < RV_STEPS; i++) {
+        uint16_t k;
+        int seen = 0;
+        if (!__builtin_memcmp(&undo_shadow[i], &cur[i], sizeof(rv_step)))
+            continue;
+        if (!fresh_group)                         /* a step already in this gesture keeps its first value */
+            for (k = undo_cur; k > 0 && undo_log[k - 1].grp == undo_grp; k--)
+                if (undo_log[k - 1].si == i && undo_log[k - 1].tp == (uint8_t)((t << 4) | p)) {
+                    seen = 1;
+                    break;
+                }
+        if (!seen) {
+            if (undo_n >= UNDO_N)
+                undo_drop_oldest();
+            if (undo_n >= UNDO_N)                 /* (one gesture of more than UNDO_N steps: forget it all) */
+                undo_n = undo_cur = 0;
+            undo_log[undo_n].tp = (uint8_t)((t << 4) | p);
+            undo_log[undo_n].si = (uint8_t)i;
+            undo_log[undo_n].grp = undo_grp;
+            undo_log[undo_n].st = undo_shadow[i];
+            undo_n++;
+            undo_cur = undo_n;
+        }
+    }
+    __builtin_memcpy(undo_shadow, cur, sizeof undo_shadow);
+}
+
+/* dir -1: undo, +1: redo. Returns 0 when there is nothing to do. */
+static int undo_step(int dir)
+{
+    uint16_t lo, hi, k;
+    uint8_t g;
+    if (dir < 0 ? undo_cur == 0 : undo_cur >= undo_n)
+        return 0;
+    g = undo_log[dir < 0 ? undo_cur - 1 : undo_cur].grp;
+    lo = hi = undo_cur;
+    if (dir < 0)
+        while (lo > 0 && undo_log[lo - 1].grp == g)
+            lo--;
+    else
+        while (hi < undo_n && undo_log[hi].grp == g)
+            hi++;
+    for (k = lo; k < (dir < 0 ? undo_cur : hi); k++) {
+        rv_step tmp, *s = &undo_pat(undo_log[k].tp)[undo_log[k].si];
+        tmp = *s;
+        *s = undo_log[k].st;
+        undo_log[k].st = tmp;
+    }
+    undo_cur = dir < 0 ? lo : hi;
+    undo_t = -1;                                  /* (the shadow is taken afresh: this is not an edit) */
+    undo_last_ms = 0;
+    return 1;
+}
+
 /* --------------------------------------------------- knob bindings --- */
 static const char *const rcurve_names[] = {"EVEN", "FASTER", "SLOWER", "BOUNCE", "EVEN-F", "FAST-F", "SLOW-F"};
 static const char *const rmove_names[] = {"NONE", "UP", "DOWN", "DARK"};
@@ -2430,6 +2545,8 @@ static void ui_project_new(void)                      /* a whole project loaded 
                                                        * last one's names, presets or edits */
 {
     int t;
+    undo_n = undo_cur = 0;                            /* (a new project has no past: undo would put the old one's steps back) */
+    undo_t = -1;
     for (t = 0; t < RV_TRACKS; t++) {
         ui.wf_name[t][0] = 0;
         ui.wf_pre[t] = -1;
@@ -3332,6 +3449,14 @@ static void buttons(uint32_t now_btn)
             ui.btn_down_ms[b] = ms;
             ui.layer_used[b] = 0;
         }
+    }
+    undo_watch();
+    if ((down & ((1u << B_OCTDN) | (1u << B_OCTUP))) && (now_btn & (1u << B_EDIT)) && !(now_btn & (1u << B_SEQ)) &&
+        cur_page()->pic != PIC_WEFT) {                  /* EDIT + OCT-: undo the last change to the steps, EDIT + OCT+: redo it */
+        int redo = (down & (1u << B_OCTUP)) != 0;
+        msg(undo_step(redo ? 1 : -1) ? (redo ? "REDO" : "UNDO") : (redo ? "NOTHING TO REDO" : "NOTHING TO UNDO"));
+        down &= ~((1u << B_OCTDN) | (1u << B_OCTUP));
+        ui.layer_used[B_EDIT] = 1;
     }
     if (ui.wf_list && ((up & (1u << B_EDIT)) || !(now_btn & (1u << B_EDIT)))) {   /* the list of blocks: EDIT let go */
         kb_t kt = {K_WF, 1};

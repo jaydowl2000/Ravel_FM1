@@ -1,0 +1,266 @@
+diff --git a/README.md b/README.md
+index c4843e2..adfa365 100644
+--- a/README.md
++++ b/README.md
+@@ -1628,6 +1628,7 @@ Hold a button (in the emulator: right-click or shift-click to latch it) and the
+ | **REC** | SEQ | The SEQ pages' keys play notes (not recording), or are steps again |
+ | **REC** | SAVE | TAKE: the last loop you played goes into the steps (on a CHANCE page: the phrase does) |
+ | **REC** | OCT− / OCT+ | On a CHANCE page: a new phrase / three steps decided again |
++| **EDIT** | OCT− / OCT+ | Undo / redo the last change to the steps on screen (a recording pass, a step edit, a lock, a EUCLID write, a paste or a clear is one change). Kept: the last 64 changed steps; a new project starts afresh. Not covered: a pattern's length, kit locks, other tracks |
+ 
+ <p align="center"><img src="docs/manual/hold-seq.png" alt="SEQ held: steps on any page" width="240"> <img src="docs/manual/hold-fx.png" alt="FX held: the punch-ins" width="240"></p>
+ 
+diff --git a/firmware/app/rv_ui.c b/firmware/app/rv_ui.c
+index 6a7f966..6ca630e 100644
+--- a/firmware/app/rv_ui.c
++++ b/firmware/app/rv_ui.c
+@@ -793,6 +793,121 @@ static int held_step(void)
+     return -1;
+ }
+ 
++/* ------------------------------------------------------------- undo --- */
++/* EDIT + OCT- undoes, EDIT + OCT+ redoes the last change to the steps of the pattern on screen
++ * (a recording pass, a step edit, a lock, a EUCLID write, a paste, a clear: one gesture, one undo).
++ *
++ * Ravel edits steps in many places, so nothing here hooks them: every frame the pattern on screen is
++ * compared with a copy of itself (undo_shadow), and the steps that changed go into a log with what they
++ * were. Changes less than UNDO_GAP_MS apart (or a held note, a turned knob) are one gesture. The log
++ * keeps only the steps that changed (22 bytes each: 64 of them are 1.4 KB), so a long history costs little RAM.
++ *
++ * Undo and redo swap in place: the log is a line of gestures, those before undo_cur can be undone and
++ * those from undo_cur on redone; each entry holds "the other" value of its step, so both ways are the
++ * same swap. A new edit drops what could still be redone.
++ * Not covered: a pattern's length, kit locks, other tracks than the one on screen. */
++#define UNDO_N 64                                 /* changed steps kept (22 bytes each): the RAM it costs */
++#define UNDO_GAP_MS 700                           /* a pause this long ends a gesture */
++typedef struct {
++    uint8_t tp;                                   /* track << 4 | pattern */
++    uint8_t si;                                   /* the step */
++    uint8_t grp;                                  /* the gesture: entries of one gesture are side by side */
++    rv_step st;                                   /* the step as it was (or, once undone, as it will be) */
++} undo_e;
++static undo_e undo_log[UNDO_N] RV_RAMBSS;
++static rv_step undo_shadow[RV_STEPS] RV_RAMBSS;   /* the pattern on screen as it was last frame */
++static uint16_t undo_n, undo_cur;                 /* entries in the log; entries that can be undone */
++static uint8_t undo_grp;                          /* the newest gesture's number */
++static int8_t undo_t = -1, undo_p;                /* which pattern the shadow is of (-1: none yet) */
++static uint32_t undo_last_ms;                     /* when the last change was seen */
++
++static rv_step *undo_pat(int tp) { return rv.pat[tp >> 4][tp & 15].s; }
++
++static void undo_drop_oldest(void)                /* the whole oldest gesture, never half of one */
++{
++    uint16_t k = 1;
++    while (k < undo_n && undo_log[k].grp == undo_log[0].grp)
++        k++;
++    __builtin_memmove(undo_log, undo_log + k, (undo_n - k) * sizeof(undo_e));
++    undo_n = (uint16_t)(undo_n - k);
++    undo_cur = undo_cur > k ? (uint16_t)(undo_cur - k) : 0;
++}
++
++/* once a frame: see what changed on the pattern on screen and log it */
++static void undo_watch(void)
++{
++    int t = ui.track, p = rv.pat_cur[t] % RV_PATTERNS, i;
++    const rv_step *cur = rv.pat[t][p].s;
++    uint32_t ms = plat_ms();
++    int fresh_group;
++    if (undo_t != t || undo_p != p) {             /* another pattern on screen: start from how it is */
++        __builtin_memcpy(undo_shadow, cur, sizeof undo_shadow);
++        undo_t = (int8_t)t;
++        undo_p = (int8_t)p;
++        return;
++    }
++    if (!__builtin_memcmp(undo_shadow, cur, sizeof undo_shadow))
++        return;
++    fresh_group = undo_cur == 0 || ms - undo_last_ms > UNDO_GAP_MS || undo_log[undo_cur - 1].tp != (uint8_t)((t << 4) | p);
++    undo_last_ms = ms;
++    if (undo_cur < undo_n)                        /* an edit drops what could have been redone */
++        undo_n = undo_cur;
++    if (fresh_group)
++        undo_grp++;
++    for (i = 0; i < RV_STEPS; i++) {
++        uint16_t k;
++        int seen = 0;
++        if (!__builtin_memcmp(&undo_shadow[i], &cur[i], sizeof(rv_step)))
++            continue;
++        if (!fresh_group)                         /* a step already in this gesture keeps its first value */
++            for (k = undo_cur; k > 0 && undo_log[k - 1].grp == undo_grp; k--)
++                if (undo_log[k - 1].si == i && undo_log[k - 1].tp == (uint8_t)((t << 4) | p)) {
++                    seen = 1;
++                    break;
++                }
++        if (!seen) {
++            if (undo_n >= UNDO_N)
++                undo_drop_oldest();
++            if (undo_n >= UNDO_N)                 /* (one gesture of more than UNDO_N steps: forget it all) */
++                undo_n = undo_cur = 0;
++            undo_log[undo_n].tp = (uint8_t)((t << 4) | p);
++            undo_log[undo_n].si = (uint8_t)i;
++            undo_log[undo_n].grp = undo_grp;
++            undo_log[undo_n].st = undo_shadow[i];
++            undo_n++;
++            undo_cur = undo_n;
++        }
++    }
++    __builtin_memcpy(undo_shadow, cur, sizeof undo_shadow);
++}
++
++/* dir -1: undo, +1: redo. Returns 0 when there is nothing to do. */
++static int undo_step(int dir)
++{
++    uint16_t lo, hi, k;
++    uint8_t g;
++    if (dir < 0 ? undo_cur == 0 : undo_cur >= undo_n)
++        return 0;
++    g = undo_log[dir < 0 ? undo_cur - 1 : undo_cur].grp;
++    lo = hi = undo_cur;
++    if (dir < 0)
++        while (lo > 0 && undo_log[lo - 1].grp == g)
++            lo--;
++    else
++        while (hi < undo_n && undo_log[hi].grp == g)
++            hi++;
++    for (k = lo; k < (dir < 0 ? undo_cur : hi); k++) {
++        rv_step tmp, *s = &undo_pat(undo_log[k].tp)[undo_log[k].si];
++        tmp = *s;
++        *s = undo_log[k].st;
++        undo_log[k].st = tmp;
++    }
++    undo_cur = dir < 0 ? lo : hi;
++    undo_t = -1;                                  /* (the shadow is taken afresh: this is not an edit) */
++    undo_last_ms = 0;
++    return 1;
++}
++
+ /* --------------------------------------------------- knob bindings --- */
+ static const char *const rcurve_names[] = {"EVEN", "FASTER", "SLOWER", "BOUNCE", "EVEN-F", "FAST-F", "SLOW-F"};
+ static const char *const rmove_names[] = {"NONE", "UP", "DOWN", "DARK"};
+@@ -2430,6 +2545,8 @@ static void ui_project_new(void)                      /* a whole project loaded
+                                                        * last one's names, presets or edits */
+ {
+     int t;
++    undo_n = undo_cur = 0;                            /* (a new project has no past: undo would put the old one's steps back) */
++    undo_t = -1;
+     for (t = 0; t < RV_TRACKS; t++) {
+         ui.wf_name[t][0] = 0;
+         ui.wf_pre[t] = -1;
+@@ -3333,6 +3450,14 @@ static void buttons(uint32_t now_btn)
+             ui.layer_used[b] = 0;
+         }
+     }
++    undo_watch();
++    if ((down & ((1u << B_OCTDN) | (1u << B_OCTUP))) && (now_btn & (1u << B_EDIT)) && !(now_btn & (1u << B_SEQ)) &&
++        cur_page()->pic != PIC_WEFT) {                  /* EDIT + OCT-: undo the last change to the steps, EDIT + OCT+: redo it */
++        int redo = (down & (1u << B_OCTUP)) != 0;
++        msg(undo_step(redo ? 1 : -1) ? (redo ? "REDO" : "UNDO") : (redo ? "NOTHING TO REDO" : "NOTHING TO UNDO"));
++        down &= ~((1u << B_OCTDN) | (1u << B_OCTUP));
++        ui.layer_used[B_EDIT] = 1;
++    }
+     if (ui.wf_list && ((up & (1u << B_EDIT)) || !(now_btn & (1u << B_EDIT)))) {   /* the list of blocks: EDIT let go */
+         kb_t kt = {K_WF, 1};
+         ui.wf_list = 0;
+diff --git a/tests/scenarios/undo.rvl b/tests/scenarios/undo.rvl
+new file mode 100644
+index 0000000..47d0e7d
+--- /dev/null
++++ b/tests/scenarios/undo.rvl
+@@ -0,0 +1,98 @@
++# UNDO / REDO: EDIT + OCT- undoes the last change to the steps on screen, EDIT + OCT+ redoes it.
++# One gesture (changes less than 0.7 s apart) is one undo.
++wait 300
++clear 1
++wait 300
++expect steps 1 0
++# nothing to undo yet
++press EDIT
++tap OCT-
++release EDIT
++wait 50
++expect msg NOTHING TO UNDO
++wait 1500
++# two separate edits
++press SEQ
++tapkey 0
++release SEQ
++wait 900
++expect steps 1 1
++press SEQ
++tapkey 2
++release SEQ
++wait 900
++expect steps 1 2
++# undo the second, then the first
++press EDIT
++tap OCT-
++release EDIT
++wait 50
++expect steps 1 1
++expect msg UNDO
++wait 200
++press EDIT
++tap OCT-
++release EDIT
++wait 50
++expect steps 1 0
++wait 200
++press EDIT
++tap OCT-
++release EDIT
++wait 50
++expect steps 1 0
++expect msg NOTHING TO UNDO
++wait 1500
++# redo both, then nothing more to redo
++press EDIT
++tap OCT+
++release EDIT
++wait 50
++expect steps 1 1
++expect msg REDO
++wait 200
++press EDIT
++tap OCT+
++release EDIT
++wait 50
++expect steps 1 2
++wait 200
++press EDIT
++tap OCT+
++release EDIT
++wait 50
++expect steps 1 2
++expect msg NOTHING TO REDO
++wait 1500
++# a new edit after an undo drops what could be redone
++press EDIT
++tap OCT-
++release EDIT
++wait 900
++expect steps 1 1
++press SEQ
++tapkey 4
++release SEQ
++wait 900
++expect steps 1 2
++press EDIT
++tap OCT+
++release EDIT
++wait 50
++expect steps 1 2
++expect msg NOTHING TO REDO
++wait 1500
++# two steps within one gesture are one undo
++press SEQ
++tapkey 6
++tapkey 7
++release SEQ
++wait 900
++expect steps 1 4
++press EDIT
++tap OCT-
++release EDIT
++wait 50
++expect steps 1 2
++# a step's own settings come back too (velocity)
++expect stepvel 1 1 100
