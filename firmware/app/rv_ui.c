@@ -806,6 +806,11 @@ static int held_step(void)
  * those from undo_cur on redone; each entry holds "the other" value of its step, so both ways are the
  * same swap. A new edit drops what could still be redone.
  * Not covered: a pattern's length, kit locks, other tracks than the one on screen. */
+#ifdef RV_FM1
+#define RV_NOINIT __attribute__((section(".noinit")))   /* (a RAM of its own: not the RAM the sound needs) */
+#else
+#define RV_NOINIT
+#endif
 #define UNDO_N 64                                 /* changed steps kept (22 bytes each): the RAM it costs */
 #define UNDO_GAP_MS 700                           /* a pause this long ends a gesture */
 typedef struct {
@@ -814,8 +819,8 @@ typedef struct {
     uint8_t grp;                                  /* the gesture: entries of one gesture are side by side */
     rv_step st;                                   /* the step as it was (or, once undone, as it will be) */
 } undo_e;
-static undo_e undo_log[UNDO_N] RV_RAMBSS;
-static rv_step undo_shadow[RV_STEPS] RV_RAMBSS;   /* the pattern on screen as it was last frame */
+static undo_e undo_log[UNDO_N] RV_NOINIT;      /* (.noinit: read only below undo_n, which starts at 0) */
+static rv_step undo_shadow[RV_STEPS] RV_NOINIT;   /* the pattern on screen as it was last frame (taken afresh while undo_t < 0) */
 static uint16_t undo_n, undo_cur;                 /* entries in the log; entries that can be undone */
 static uint8_t undo_grp;                          /* the newest gesture's number */
 static int8_t undo_t = -1, undo_p;                /* which pattern the shadow is of (-1: none yet) */
@@ -2870,11 +2875,6 @@ static void preset_turn(int d)
 
 /* the projects' names and which are used, for SAVE (worked out again each time it opens: in .noinit, outside the
  * RAM the sound needs) */
-#ifdef RV_FM1
-#define RV_NOINIT __attribute__((section(".noinit")))
-#else
-#define RV_NOINIT
-#endif
 static char slot_names[PLAT_PROJECTS][13] RV_NOINIT;
 static uint8_t slot_used[PLAT_PROJECTS] RV_NOINIT;
 static void slots_refresh(void)
