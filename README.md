@@ -2036,4 +2036,4 @@ GPL-3.0 only (see `LICENSE`). The FM-1 platform layer, loader, installer and too
 - The Salamander Grand Piano V3 by Alexander Holm (CC-BY 3.0, [archive.org](https://archive.org/details/SalamanderGrandPianoV3)): the PIANO's ATTACK is 25 ms of its F#4's hammer strike (`firmware/app/rv_pnatk.h`, made by `tools/make_piano_attack.py`); the strings are Ravel's own model, checked against its recordings.
 - Devin Acker and MAME, whose uPD933 emulation shows how the Casio CZ's sound chip works (the CZ engine follows it; BSD-3-Clause, see `THIRD_PARTY.md`).
 
-<p align="center"><img src="docs/brand/ravel-logo-footer.jpg" alt="RAVEL · FM-1 custom synth firmware" width="360"></p>
+<p align="center"><img src="docs/brand/ravel-logo-footer.jpg" alt="RAVEL · FM-1 custom synth firmware" width="360"></p>  
