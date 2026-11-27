@@ -169,9 +169,9 @@ shot seq-steps.png
 turn SELECT -20
 turn SELECT 1
 wait 150
-expect page TEMPO
+expect page STEP FEEL
 wait 600
-shot seq-tempo.png
+shot seq-feel.png
 tap SEQ
 turn SELECT -20
 turn SELECT 2
@@ -364,20 +364,7 @@ shot hold-fx.png
 release FX
 wait 200
 tap PLAY
-tap SAVE
-turn K1 -10
-wait 200
-turn K1 1
-wait 200
-turn K1 1
-wait 200
-turn K1 1
-wait 200
-turn K1 1
-wait 200
-
-tap SAVE
-tap SAVE
+demo 3                       # (the graph song: a fixture now, not SAVE > DEMO 3)
 wait 300
 tap PLAY
 wait 3000

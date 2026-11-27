@@ -1,0 +1,99 @@
+# UNDO covers the sound too: a track's parameters (ALGORITHM, level...) and the song's FX values, while a
+# knob is being turned; undo goes back through steps and sounds in the order they were made.
+wait 300
+settp 1 ENGINE 0
+settp 1 LEVEL 90
+wait 300
+expect page TRACKS
+# an abrupt change of ALGORITHM (knob 4 on TRACKS), a pause, then the level (knob 1)
+turn K4 3
+wait 100
+expect tp 1 ENGINE 3
+wait 1000
+turn K1 -1
+wait 100
+expect tp 1 LEVEL 89
+wait 1000
+# a step edit after them
+press SEQ
+tapkey 0
+release SEQ
+wait 900
+expect steps 1 1
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect steps 1 0
+expect tp 1 LEVEL 89
+wait 300
+# the level, then the algorithm: back to the sound that was being worked on
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect tp 1 LEVEL 90
+expect tp 1 ENGINE 3
+wait 300
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect tp 1 ENGINE 0
+expect msg UNDO
+wait 300
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect msg NOTHING TO UNDO
+wait 1500
+# and forward again: algorithm, level, then the step
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect tp 1 ENGINE 3
+wait 300
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect tp 1 LEVEL 89
+expect steps 1 0
+wait 300
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect steps 1 1
+# a change made some other way (not a knob turning: a scene, a macro, the matrix) is not an edit to undo
+settp 1 LEVEL 40
+wait 1000
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect steps 1 0
+expect tp 1 LEVEL 40
+# the song's FX are covered too: FX > DELAY, knob 3 (FEEDBACK)
+wait 1000
+tap FX
+wait 300
+expect page DELAY
+settp 1 LEVEL 40
+expect gp FEEDBK 50
+turn K3 -1
+wait 100
+expect gp FEEDBK 49
+wait 1000
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect gp FEEDBK 50
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect gp FEEDBK 49

@@ -191,8 +191,8 @@ static const page_t pages[] = {
     {SEC_SEQ, V_CHANCE, PIC_CHANCE, PR_NONE, "CHANCE", {TP(TP_H1ROLE), TP(TP_H1SHAPE), TP(TP_H1DEPTH), TP(TP_H1CYCLE)}},
     {SEC_SEQ, V_CHANCE, PIC_CHANCE, PR_NONE, "CHANCE SHAPE", {TP(TP_H1COMB), TP(TP_H1TRANS), TP(TP_H2TARGET), TP(TP_H2SHAPE)}},
     {SEC_SEQ, V_CHANCE, PIC_CHANCE, PR_NONE, "CHANCE MORE", {TP(TP_H2DEPTH), TP(TP_H2CYCLE), TP(TP_H2COMB), TP(TP_H2TRANS)}},
-    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEPS", {SF(SF_NOTE), SF(SF_VEL), SF(SF_LEN), SF(SF_CHANCE)}},
-    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_PATTERN, "TEMPO", {GP(GP_TEMPO), GP(GP_SWING), TP(TP_LEN), TP(TP_RATE)}},   /* (the same TEMPO and SWING as GLO > CLOCK) */
+    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEPS", {{K_LRN, 8}, {K_LRN, 9}, SF(SF_LEN), SF(SF_VEL)}},   /* STEP across, NOTE up and down; the grid shows the notes that have a hit */
+    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEP FEEL", {TP(TP_RATE), SF(SF_MICRO), SF(SF_RATCHET), SF(SF_TIE)}},   /* RATE: the track's division (TEMPO and SWING stay on GLO > CLOCK) */
     {SEC_SEQ, V_KIT, PIC_DRUM, PR_PATTERN, "TEMPO", {GP(GP_TEMPO), GP(GP_SWING), TP(TP_LEN), TP(TP_RATE)}},
     {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEP TIMING", {SF(SF_MICRO), SF(SF_RATCHET), SF(SF_RCURVE), SF(SF_COND)}},
     {SEC_SEQ, V_KITSTEPS, PIC_DRUM, PR_STEP, "STEP TIMING", {SF(SF_MICRO), SF(SF_RCURVE), SF(SF_COND), SF(SF_RMOVE)}},
@@ -228,7 +228,7 @@ static const page_t pages[] = {
     {SEC_SONG, V_ALL, PIC_CPU2, PR_NONE, "CPU 2", {{K_STRESS, 7}, {K_STRESS, 8}, {K_STRESS, 9}, {K_STRESS, 10}}},   /* BUFFER, GUARD, SCREEN, CORE TEST */
     {SEC_SONG, V_ALL, PIC_STRESS, PR_NONE, "STRESS", {{K_STRESS, 0}, {K_STRESS, 1}, {K_STRESS, 2}, NO}},   /* how much this unit takes */
     {SEC_SONG, V_ALL, PIC_FLASH, PR_NONE, "FLASH", {NO, NO, NO, NO}},   /* the flash as the boot set it up (read only) */
-    {SEC_SONG, V_ALL, PIC_PANEL, PR_NONE, "PANEL", {{K_LRN, 3}, {K_LRN, 5}, NO, NO}},   /* the FM-1's own: kept through power-off; START WITH: the last project at power-on, or a blank one */
+    {SEC_SONG, V_ALL, PIC_PANEL, PR_NONE, "PANEL", {{K_LRN, 3}, {K_LRN, 5}, {K_LRN, 6}, {K_LRN, 7}}},   /* the FM-1's own: kept through power-off; THEME and ACCENT: the colours; START WITH: the last project at power-on, or a blank one */
 
     {SEC_SAVE, V_ALL, PIC_SAVE, PR_SLOT, "PROJECT", {{K_SAVE, 0}, {K_SAVE, 1}, {K_SAVE, 2}, NO}},   /* the action; the project's name, as SOUNDS names a sound */
     {SEC_SAVE, V_ALL, PIC_BANK, PR_BANK, "SOUNDS", {{K_BANK, 0}, {K_BANK, 1}, {K_BANK, 2}, {K_BANK, 3}}},   /* your own sounds, any kind, in banks A-D */
@@ -243,6 +243,7 @@ static struct {
     uint8_t layer_used[NB];
     uint8_t step_page;                       /* SEQ: which 16 steps the keys show */
     int16_t step_cur;                        /* the step the step pages edit */
+    int8_t ng_n;                             /* the note grid's row: the note, in semitones from C4 (60), C-1 to G9 */
     uint8_t cz_row;                          /* the CZ envelope pages: stages 1-2, 3-4, 5-6, 7-8, or SUS and END (OCT) */
     uint8_t lane[RV_TRACKS];                 /* each KIT track's chosen lane */
     uint8_t lane_row;                        /* the LANE pages: which row of the lane's settings the knobs hold */
@@ -543,6 +544,7 @@ typedef struct {
     mbind_t b[NBIND];
     uint8_t start;                                    /* (third version) bit 0: START WITH a blank project (0: the last one) */
     uint8_t last;                                     /* the project last saved or loaded: its slot + 1 (0: none) */
+    uint8_t theme;                                    /* bit 0: LIGHT (0: DARK); bits 1-2: ACCENT (0 BONE, 1 BLUE, 2 GREEN, 3 PURPLE) */
 } prefs_t;
 #define PREFS_V2 ((int)__builtin_offsetof(prefs_t, start))   /* (the second version: no START WITH) */
 static const uint8_t pref_gp[3] = {GP_MIDICH, GP_MIDICLK, GP_MIDITRN};
@@ -685,6 +687,8 @@ static kb_t page_knob(const page_t *pg, int i)
 }
 
 static int note_track_ui(int t);
+static void step_toggle_note(rv_step *s, int note);
+static int analog_on(void);
 /* ANALOG: the STEPS page seen as an analog sequencer (SEQ on STEPS turns it on and off): 16 pitch faders over gate
  * faders and on/off switches, the knobs on four at a time (SELECT: which four), a step held: its GATE (velocity) */
 static int analog_on(void);
@@ -793,13 +797,235 @@ static int held_step(void)
     return -1;
 }
 
+/* ------------------------------------------------------------- undo --- */
+/* EDIT + OCT- undoes, EDIT + OCT+ redoes the last change to the steps of the pattern on screen
+ * (a recording pass, a step edit, a lock, a EUCLID write, a paste, a clear: one gesture, one undo).
+ *
+ * Ravel edits steps in many places, so nothing here hooks them: every frame the pattern on screen is
+ * compared with a copy of itself (undo_shadow), and the steps that changed go into a log with what they
+ * were. Changes less than UNDO_GAP_MS apart (or a held note, a turned knob) are one gesture. The log
+ * keeps only the steps that changed (24 bytes each: 64 of them are 1.5 KB), so a long history costs little RAM.
+ *
+ * Undo and redo swap in place: the log is a line of gestures, those before undo_cur can be undone and
+ * those from undo_cur on redone; each entry holds "the other" value of its step, so both ways are the
+ * same swap. A new edit drops what could still be redone.
+ * Sound and FX are covered the same way: while a knob or PRESETS is being turned, the track on screen's
+ * parameters (the sound: ALGORITHM, filter, envelopes, its sends) and the song's global ones (delay, space, bed)
+ * are compared with a copy too, and what changed goes into a second, smaller log (6 bytes a value). Both logs
+ * share one gesture counter, so UNDO goes back through steps and sounds in the order they were made.
+ * Not covered: a pattern's length, kit locks and lanes, CZ envelopes, WEFT patches, other tracks than the one on screen. */
+#ifdef RV_FM1
+#define RV_NOINIT __attribute__((section(".noinit")))   /* (a RAM of its own: not the RAM the sound needs) */
+#else
+#define RV_NOINIT
+#endif
+#define UNDO_N 64                                 /* changed steps kept (22 bytes each): the RAM it costs */
+#define UNDO_GAP_MS 700                           /* a pause this long ends a gesture */
+typedef struct {
+    uint8_t tp;                                   /* track << 4 | pattern */
+    uint8_t si;                                   /* the step */
+    uint16_t grp;                                 /* the gesture: entries of one gesture are side by side */
+    rv_step st;                                   /* the step as it was (or, once undone, as it will be) */
+} undo_e;
+#define UNDO_PN 160                               /* changed sound values kept (6 bytes each) */
+typedef struct {
+    uint16_t grp;                                 /* the gesture (the same counter as the steps') */
+    uint8_t who;                                  /* 0..7: that track's parameters, 8: the song's */
+    uint8_t id;
+    int16_t v;                                    /* the value as it was (or, once undone, as it will be) */
+} undo_pe;
+static undo_pe undo_plog[UNDO_PN] RV_NOINIT;
+static int16_t undo_tps[RV_TP] RV_NOINIT, undo_gps[RV_GP] RV_NOINIT;   /* the sound on screen as it was last frame */
+static uint16_t undo_pn, undo_pcur;               /* like undo_n and undo_cur, for the sound log */
+static int8_t undo_pt = -1;                       /* which track the sound shadow is of (-1: none yet) */
+static uint8_t undo_last_kind;                    /* what the newest change was: 0 steps, 1 sound */
+static uint32_t undo_touch_ms;                    /* when a knob or PRESETS was last turned: only then is a changed sound an edit */
+static undo_e undo_log[UNDO_N] RV_NOINIT;      /* (.noinit: read only below undo_n, which starts at 0) */
+static rv_step undo_shadow[RV_STEPS] RV_NOINIT;   /* the pattern on screen as it was last frame (taken afresh while undo_t < 0) */
+static uint16_t undo_n, undo_cur;                 /* entries in the log; entries that can be undone */
+static uint16_t undo_grp;                         /* the newest gesture's number */
+static int8_t undo_t = -1, undo_p;                /* which pattern the shadow is of (-1: none yet) */
+static uint32_t undo_last_ms;                     /* when the last change was seen */
+
+static rv_step *undo_pat(int tp) { return rv.pat[tp >> 4][tp & 15].s; }
+
+static void undo_drop_oldest(void)                /* the whole oldest gesture, never half of one */
+{
+    uint16_t k = 1;
+    while (k < undo_n && undo_log[k].grp == undo_log[0].grp)
+        k++;
+    __builtin_memmove(undo_log, undo_log + k, (undo_n - k) * sizeof(undo_e));
+    undo_n = (uint16_t)(undo_n - k);
+    undo_cur = undo_cur > k ? (uint16_t)(undo_cur - k) : 0;
+}
+
+static void undo_pdrop_oldest(void)
+{
+    uint16_t k = 1;
+    while (k < undo_pn && undo_plog[k].grp == undo_plog[0].grp)
+        k++;
+    __builtin_memmove(undo_plog, undo_plog + k, (undo_pn - k) * sizeof(undo_pe));
+    undo_pn = (uint16_t)(undo_pn - k);
+    undo_pcur = undo_pcur > k ? (uint16_t)(undo_pcur - k) : 0;
+}
+
+static void undo_ppush(uint8_t who, int id, int16_t old)
+{
+    if (undo_pn >= UNDO_PN)
+        undo_pdrop_oldest();
+    if (undo_pn >= UNDO_PN)                       /* (one gesture of more than UNDO_PN values: forget the sound history) */
+        undo_pn = undo_pcur = 0;
+    undo_plog[undo_pn].grp = undo_grp;
+    undo_plog[undo_pn].who = who;
+    undo_plog[undo_pn].id = (uint8_t)id;
+    undo_plog[undo_pn].v = old;
+    undo_pn++;
+    undo_pcur = undo_pn;
+}
+
+/* once a frame: see what changed on the pattern and the sound on screen and log it */
+static void undo_watch(void)
+{
+    int t = ui.track, p = rv.pat_cur[t] % RV_PATTERNS, i;
+    const rv_step *cur = rv.pat[t][p].s;
+    uint32_t ms = plat_ms();
+    int fresh_group, steps_changed = 0, sound_changed = 0;
+    if (undo_t != t || undo_p != p) {             /* another pattern on screen: start from how it is */
+        __builtin_memcpy(undo_shadow, cur, sizeof undo_shadow);
+        undo_t = (int8_t)t;
+        undo_p = (int8_t)p;
+    } else if (__builtin_memcmp(undo_shadow, cur, sizeof undo_shadow)) {
+        steps_changed = 1;
+    }
+    if (undo_pt != t) {                           /* another track: its sound as it is */
+        __builtin_memcpy(undo_tps, rv.tp[t], sizeof undo_tps);
+        __builtin_memcpy(undo_gps, rv.gp, sizeof undo_gps);
+        undo_pt = (int8_t)t;
+    } else if (__builtin_memcmp(undo_tps, rv.tp[t], sizeof undo_tps) || __builtin_memcmp(undo_gps, rv.gp, sizeof undo_gps)) {
+        if (ms - undo_touch_ms < 250)             /* (a knob was turning: an edit; else a scene, a macro or the matrix moved it) */
+            sound_changed = 1;
+        else {
+            __builtin_memcpy(undo_tps, rv.tp[t], sizeof undo_tps);
+            __builtin_memcpy(undo_gps, rv.gp, sizeof undo_gps);
+        }
+    }
+    if (!steps_changed && !sound_changed)
+        return;
+    fresh_group = (undo_cur == 0 && undo_pcur == 0) || ms - undo_last_ms > UNDO_GAP_MS || undo_last_kind != (sound_changed ? 1 : 0) ||
+                  (!sound_changed && (undo_cur == 0 || undo_log[undo_cur - 1].tp != (uint8_t)((t << 4) | p)));
+    undo_last_ms = ms;
+    undo_last_kind = (uint8_t)(sound_changed ? 1 : 0);
+    if (undo_cur < undo_n)                        /* an edit drops what could have been redone */
+        undo_n = undo_cur;
+    if (undo_pcur < undo_pn)
+        undo_pn = undo_pcur;
+    if (fresh_group)
+        undo_grp++;
+    if (sound_changed) {
+        for (i = 0; i < RV_TP + RV_GP; i++) {
+            int16_t was = i < RV_TP ? undo_tps[i] : undo_gps[i - RV_TP], now = i < RV_TP ? rv.tp[t][i] : rv.gp[i - RV_TP];
+            uint16_t k;
+            int seen = 0;
+            if (was == now)
+                continue;
+            if (!fresh_group)                     /* a value already in this gesture keeps its first one */
+                for (k = undo_pcur; k > 0 && undo_plog[k - 1].grp == undo_grp; k--)
+                    if (undo_plog[k - 1].who == (i < RV_TP ? t : 8) && undo_plog[k - 1].id == (i < RV_TP ? i : i - RV_TP)) {
+                        seen = 1;
+                        break;
+                    }
+            if (!seen)
+                undo_ppush((uint8_t)(i < RV_TP ? t : 8), i < RV_TP ? i : i - RV_TP, was);
+        }
+        __builtin_memcpy(undo_tps, rv.tp[t], sizeof undo_tps);
+        __builtin_memcpy(undo_gps, rv.gp, sizeof undo_gps);
+    }
+    if (!steps_changed)
+        return;
+    for (i = 0; i < RV_STEPS; i++) {
+        uint16_t k;
+        int seen = 0;
+        if (!__builtin_memcmp(&undo_shadow[i], &cur[i], sizeof(rv_step)))
+            continue;
+        if (!fresh_group)                         /* a step already in this gesture keeps its first value */
+            for (k = undo_cur; k > 0 && undo_log[k - 1].grp == undo_grp; k--)
+                if (undo_log[k - 1].si == i && undo_log[k - 1].tp == (uint8_t)((t << 4) | p)) {
+                    seen = 1;
+                    break;
+                }
+        if (!seen) {
+            if (undo_n >= UNDO_N)
+                undo_drop_oldest();
+            if (undo_n >= UNDO_N)                 /* (one gesture of more than UNDO_N steps: forget it all) */
+                undo_n = undo_cur = 0;
+            undo_log[undo_n].tp = (uint8_t)((t << 4) | p);
+            undo_log[undo_n].si = (uint8_t)i;
+            undo_log[undo_n].grp = undo_grp;
+            undo_log[undo_n].st = undo_shadow[i];
+            undo_n++;
+            undo_cur = undo_n;
+        }
+    }
+    __builtin_memcpy(undo_shadow, cur, sizeof undo_shadow);
+}
+
+/* dir -1: undo, +1: redo. Returns 0 when there is nothing to do. The gesture is the newest one (undo) or the
+ * oldest one after the present (redo), whichever of the two logs it is in, or both. */
+static int undo_step(int dir)
+{
+    uint16_t lo, hi, k, plo, phi;
+    int has_s = dir < 0 ? undo_cur > 0 : undo_cur < undo_n, has_p = dir < 0 ? undo_pcur > 0 : undo_pcur < undo_pn;
+    uint16_t gs = has_s ? undo_log[dir < 0 ? undo_cur - 1 : undo_cur].grp : 0, gp = has_p ? undo_plog[dir < 0 ? undo_pcur - 1 : undo_pcur].grp : 0, g;
+    if (!has_s && !has_p)
+        return 0;
+    if (has_s && has_p)                           /* both logs have one: the more recent (undo) or the older (redo) */
+        g = (int16_t)(gs - gp) > 0 ? (dir < 0 ? gs : gp) : (dir < 0 ? gp : gs);
+    else
+        g = has_s ? gs : gp;
+    lo = hi = undo_cur;
+    plo = phi = undo_pcur;
+    if (has_s && gs == g) {
+        if (dir < 0)
+            while (lo > 0 && undo_log[lo - 1].grp == g)
+                lo--;
+        else
+            while (hi < undo_n && undo_log[hi].grp == g)
+                hi++;
+        for (k = lo; k < (dir < 0 ? undo_cur : hi); k++) {
+            rv_step tmp, *s = &undo_pat(undo_log[k].tp)[undo_log[k].si];
+            tmp = *s;
+            *s = undo_log[k].st;
+            undo_log[k].st = tmp;
+        }
+        undo_cur = dir < 0 ? lo : hi;
+    }
+    if (has_p && gp == g) {
+        if (dir < 0)
+            while (plo > 0 && undo_plog[plo - 1].grp == g)
+                plo--;
+        else
+            while (phi < undo_pn && undo_plog[phi].grp == g)
+                phi++;
+        for (k = plo; k < (dir < 0 ? undo_pcur : phi); k++) {
+            int16_t *v = undo_plog[k].who == 8 ? &rv.gp[undo_plog[k].id & (RV_GP - 1)] : &rv.tp[undo_plog[k].who & 7][undo_plog[k].id % RV_TP], tmp = *v;
+            *v = undo_plog[k].v;
+            undo_plog[k].v = tmp;
+        }
+        undo_pcur = dir < 0 ? plo : phi;
+    }
+    undo_t = -1;                                  /* (the shadows are taken afresh: this is not an edit) */
+    undo_pt = -1;
+    undo_last_ms = 0;
+    return 1;
+}
+
 /* --------------------------------------------------- knob bindings --- */
 static const char *const rcurve_names[] = {"EVEN", "FASTER", "SLOWER", "BOUNCE", "EVEN-F", "FAST-F", "SLOW-F"};
 static const char *const rmove_names[] = {"NONE", "UP", "DOWN", "DARK"};
 static const char *const cshape_names[] = {"EVEN", "BOUNCE", "DRAG"};
 static const char *const csize_names[] = {"MASTER", "1/32", "1/16", "1/8", "1/6", "1/4", "1/3", "1/2"};
 static const char *const cut_names[] = {"NONE", "LOOP", "REVERSE", "STUTTER"};
-static const char *const save_actions[] = {"SAVE", "LOAD", "DEMO 1", "DEMO 2", "DEMO 3", "INIT", "CLEAR"};
+static const char *const save_actions[] = {"SAVE", "LOAD", "INIT", "CLEAR"};
 static const char *const bank_actions[] = {"LOAD", "SAVE", "CLEAR"};
 static const char *const bank_letters[] = {"A", "B", "C", "D"};
 static const char *const curve_names[] = {"LINEAR", "EXP", "LOG", "S"};
@@ -1241,11 +1467,17 @@ static RV_SMALL kinfo_t kb_info(kb_t k)
     case K_LRN: {
         static const char *const ln[] = {"OFF", "ARMED", "ARMED"}, *const one[] = {"TURN"};
         static const char *const bl[] = {"OFF", "LOW", "MID", "HIGH"}, *const st[] = {"NEXT", "STAY"};
-        static const char *const kn[] = {"LEARN", "DELETE", "CLEAR ALL", "BACKLIGHT", "STEP REC", "START WITH"}, *const sw[] = {"LAST", "BLANK"};
-        r.name = kn[k.id < 6 ? k.id : 0];
+        static const char *const kn[] = {"LEARN", "DELETE", "CLEAR ALL", "BACKLIGHT", "STEP REC", "START WITH", "THEME", "ACCENT", "STEP", "NOTE"}, *const sw[] = {"LAST", "BLANK"};
+        static const char *const tm[] = {"DARK", "LIGHT"}, *const ac[] = {"BONE", "BLUE", "GREEN", "PURPLE"};
+        r.name = kn[k.id < 10 ? k.id : 0];
         r.fmt = PF_ENUM;
-        r.max = k.id == 0 ? 2 : k.id == 3 ? 3 : k.id == 4 || k.id == 5 ? 1 : 0;
-        r.names = k.id == 0 ? ln : k.id == 3 ? bl : k.id == 4 ? st : k.id == 5 ? sw : one;
+        if (k.id >= 8) {                          /* the note grid: STEP (1 to 64) and NOTE (C-1 to G9) */
+            r.fmt = k.id == 8 ? PF_NUM : PF_NOTE;
+            r.max = k.id == 8 ? 63 : 127;
+            break;
+        }
+        r.max = k.id == 0 ? 2 : k.id == 3 || k.id == 7 ? 3 : k.id >= 4 && k.id <= 6 ? 1 : 0;
+        r.names = k.id == 0 ? ln : k.id == 3 ? bl : k.id == 4 ? st : k.id == 5 ? sw : k.id == 6 ? tm : k.id == 7 ? ac : one;
         break;
     }
     case K_SAVE:
@@ -1474,7 +1706,7 @@ static RV_SMALL int kb_get(kb_t k)
         }
     }
     case K_LRN:
-        return k.id == 0 ? learn : k.id == 3 ? prefs_back_get() : k.id == 4 ? prefs_stay() : k.id == 5 ? prefs.start & 1 : 0;
+        return k.id == 0 ? learn : k.id == 3 ? prefs_back_get() : k.id == 4 ? prefs_stay() : k.id == 5 ? prefs.start & 1 : k.id == 6 ? prefs.theme & 1 : k.id == 7 ? (prefs.theme >> 1) & 3 : k.id == 8 ? ui.step_cur : k.id == 9 ? 60 + ui.ng_n : 0;
     case K_WF: {
         const rv_weft *w = &rv.weft[ui.track];
         int b = ui.wf_blk % WF_BLOCKS;
@@ -2074,6 +2306,13 @@ static RV_SMALL void kb_format(kb_t k, int v, char *o)
         rv_param_format(PID_G(k.id), v, o, 12);
         return;
     }
+    if (k.kind == K_LRN && k.id >= 8) {
+        if (k.id == 8)
+            sx_int(o, v + 1);
+        else
+            sx_note(o, v);
+        return;
+    }
     if ((k.kind == K_STEP && k.id == SF_NOTE) || (k.kind == K_ANA && held_step() < 0)) {
         sx_note(o, v);
         return;
@@ -2430,6 +2669,9 @@ static void ui_project_new(void)                      /* a whole project loaded 
                                                        * last one's names, presets or edits */
 {
     int t;
+    undo_n = undo_cur = 0;                            /* (a new project has no past: undo would put the old one's steps back) */
+    undo_pn = undo_pcur = 0;
+    undo_t = -1;
     for (t = 0; t < RV_TRACKS; t++) {
         ui.wf_name[t][0] = 0;
         ui.wf_pre[t] = -1;
@@ -2753,11 +2995,6 @@ static void preset_turn(int d)
 
 /* the projects' names and which are used, for SAVE (worked out again each time it opens: in .noinit, outside the
  * RAM the sound needs) */
-#ifdef RV_FM1
-#define RV_NOINIT __attribute__((section(".noinit")))
-#else
-#define RV_NOINIT
-#endif
 static char slot_names[PLAT_PROJECTS][13] RV_NOINIT;
 static uint8_t slot_used[PLAT_PROJECTS] RV_NOINIT;
 static void slots_refresh(void)
@@ -2806,18 +3043,7 @@ static void save_do(void)
             msg("SLOT EMPTY");
         break;
     }
-    case 2:
-    case 3:
-    case 4:
-        rv_transport(0);
-        rv_all_off();
-        rv_hush = 1;
-        rv_demo(ui.save_action == 4 ? 3 : ui.save_action - 2);
-        rv_hush = 0;
-        ui_project_new();
-        msg(ui.save_action == 2 ? "DEMO: RAVEL" : ui.save_action == 3 ? "DEMO: DUST" : "DEMO: GRAPH");
-        break;
-    case 6:                                           /* CLEAR: the slot emptied (the project you have is kept) */
+    case 3:                                           /* CLEAR: the slot emptied (the project you have is kept) */
         if (plat_proj_clear(PLAT_PROJ(ui.cur_slot)) == 0) {
             if (prefs.last == ui.cur_slot + 1) {      /* (nothing to open at power-on now) */
                 prefs.last = 0;
@@ -3047,10 +3273,12 @@ static void key_event(int k, int on)
                             rv_kitlock_clear(t, rv.pat_cur[t] % RV_PATTERNS, ui.step_page * 16 + wi, ui.lane[t] % RV_LANES);
                         }
                         s->flags = (uint8_t)(s->note & 63 ? s->flags | ST_ON : s->flags & ~ST_ON);
-                    } else {
+                    } else if (analog_on()) {                 /* the ANALOG view: a tap on or off, the faders set the notes */
                         s->flags ^= ST_ON;
                         if ((s->flags & ST_ON) && s->vel == 0)
                             s->vel = 100;
+                    } else {
+                        step_toggle_note(s, 60 + ui.ng_n);   /* the grid: a tap puts the knob's note in, or takes it out */
                     }
                 }
                 return;
@@ -3333,6 +3561,14 @@ static void buttons(uint32_t now_btn)
             ui.layer_used[b] = 0;
         }
     }
+    undo_watch();
+    if ((down & ((1u << B_OCTDN) | (1u << B_OCTUP))) && (now_btn & (1u << B_EDIT)) && !(now_btn & (1u << B_SEQ)) &&
+        cur_page()->pic != PIC_WEFT) {                  /* EDIT + OCT-: undo the last change to the steps, EDIT + OCT+: redo it */
+        int redo = (down & (1u << B_OCTUP)) != 0;
+        msg(undo_step(redo ? 1 : -1) ? (redo ? "REDO" : "UNDO") : (redo ? "NOTHING TO REDO" : "NOTHING TO UNDO"));
+        down &= ~((1u << B_OCTDN) | (1u << B_OCTUP));
+        ui.layer_used[B_EDIT] = 1;
+    }
     if (ui.wf_list && ((up & (1u << B_EDIT)) || !(now_btn & (1u << B_EDIT)))) {   /* the list of blocks: EDIT let go */
         kb_t kt = {K_WF, 1};
         ui.wf_list = 0;
@@ -3395,7 +3631,7 @@ static void buttons(uint32_t now_btn)
     if (down & (1u << B_OCTDN)) {
         if ((ui.sec == SEC_SEQ || (now_btn & (1u << B_SEQ))) && !seq_keys_play(ui.track)) {
             ui.step_page = (uint8_t)(ui.step_page ? ui.step_page - 1 : 0);
-            if (cur_page()->pr == PR_STEPCUR)         /* the graph: the knobs go to the page's first step */
+            if (cur_page()->pr == PR_STEPCUR || cur_page()->pr == PR_STEP)   /* the graph and the grid: the knobs go to the page's first step */
                 ui.step_cur = (int16_t)(ui.step_page * 16);
         }
         else if (ui.octave > -3)
@@ -3406,7 +3642,7 @@ static void buttons(uint32_t now_btn)
             int pages_n = (clampi(rv.tp[ui.track][TP_LEN], 1, 64) + 15) / 16;
             if (ui.step_page + 1 < pages_n) {
                 ui.step_page++;
-                if (cur_page()->pr == PR_STEPCUR)
+                if (cur_page()->pr == PR_STEPCUR || cur_page()->pr == PR_STEP)
                     ui.step_cur = (int16_t)(ui.step_page * 16);
             }
         } else if (ui.octave < 3)
@@ -3487,6 +3723,7 @@ static void prefs_init(void)
             p.v[i] = (int16_t)rv_pinfo_global(pref_gp[i])->def;
     }
     prefs = p;
+    theme_apply(prefs.theme & 1, (prefs.theme >> 1) & 3);   /* (any byte there is a valid theme) */
 }
 static void prefs_touch(void)                         /* something in them changed: keep it soon */
 {
@@ -3653,8 +3890,28 @@ static void learn_knob_any(int kind, int id)          /* learning, and a knob tu
 }
 static void lrn_turn(int id, int d)                   /* MIDI LEARN's knobs: LEARN, DELETE, CLEAR ALL; PANEL's BACKLIGHT */
 {
+    if (id == 8) {                                    /* STEPS: the step on the knobs, across (the keys' page follows) */
+        ui.step_cur = (int16_t)clampi(ui.step_cur + d, 0, clampi(rv.tp[ui.track][TP_LEN], 1, 64) - 1);
+        ui.step_page = (uint8_t)(ui.step_cur / 16);
+        return;
+    }
+    if (id == 9) {                                    /* STEPS: the note (row) on the knobs, up and down the keyboard */
+        ui.ng_n = (int8_t)clampi(ui.ng_n + d, -60, 67);
+        return;
+    }
     if (id == 3) {
         prefs.back = (uint8_t)((clampi(prefs_back() + d, 0, 3) + 1) | (prefs.back & 0x80));
+        prefs_touch();
+        return;
+    }
+    if (id == 6 || id == 7) {                         /* THEME (DARK or LIGHT) and ACCENT (BONE, BLUE, GREEN, PURPLE) */
+        int light = prefs.theme & 1, acc = (prefs.theme >> 1) & 3;
+        if (id == 6)
+            light = d > 0;
+        else
+            acc = clampi(acc + d, 0, 3);
+        prefs.theme = (uint8_t)(light | acc << 1);
+        theme_apply(light, acc);
         prefs_touch();
         return;
     }
@@ -3834,6 +4091,8 @@ RV_SMALL void ui_input_only(void)
         }
     }
     d = plat_enc(EN_PRESET);
+    if (d)
+        undo_touch_ms = plat_ms();                    /* (browsing sounds is an edit of the sound) */
     if (d && held_step() >= 0 && !loop_track_ui(ui.track) && ui.srec_t != ui.track) {   /* a step held: PRESETS nudges it */
         int len = clampi(rv.tp[ui.track][TP_LEN], 1, RV_STEPS), from = held_step(), to = ((from + (d > 0 ? 1 : -1)) % len + len) % len;
         char b[24] = "STEP ";
@@ -3855,6 +4114,8 @@ RV_SMALL void ui_input_only(void)
     }
     for (i = 0; i < 4; i++) {
         d = plat_enc(EN_K1 + i);
+        if (d)
+            undo_touch_ms = plat_ms();
         vio_turn(d);
         if (d) {                                      /* (a short list, a few choices: one a detent, never sped up) */
             kb_t k = page_knob(cur_page(), i);
@@ -3883,7 +4144,7 @@ static uint16_t kind_dcol(int t)
     int k = rv.tp[t][TP_KIND];
     return k == KIND_SYNTH ? C_SYNTH_D : k == KIND_STRIKE ? C_STRIKE_D : k == KIND_PERC ? C_PERC_D : C_TAPE_D;
 }
-static const uint16_t knob_col[4] = {C_K1, C_K2, C_K3, C_K4};
+#define knob_col (&th_c[TC_K1])                    /* (C_K1..C_K4: consecutive in the theme table) */
 
 static const char *sound_name(int t)
 {
@@ -4111,7 +4372,7 @@ static void draw_footer(void)
         hint = lh;
         break;
     }
-    case PR_SLOT: hint = ui.save_confirm ? (ui.save_action == 6 ? "PRESS SAVE AGAIN TO CLEAR IT" : "PRESS SAVE AGAIN TO CONFIRM")
+    case PR_SLOT: hint = ui.save_confirm ? (ui.save_action == 3 ? "PRESS SAVE AGAIN TO CLEAR IT" : "PRESS SAVE AGAIN TO CONFIRM")
                        : "PRESETS: SLOT  SAVE: DO IT"; break;
     case PR_LEARN: hint = "PRESETS: PICK ONE"; break;
     case PR_WLIB: hint = "SAVE: SAVE  BLK: LD SV DEL INIT CLR"; break;
@@ -5501,7 +5762,7 @@ static void pic_cpu2(void)                          /* BUFFER, GUARD, SCREEN, CO
     int y = PIC_Y + 2;
     g_text(6, y, &FONT_T, "BUFFER SAFE: A BLOCK RENDERED AHEAD, SO", C_DIM);
     g_text(6, y + 10, &FONT_T, "ONE BUSY BLOCK FITS. HEARD 12 MS LATER.", C_DIM);
-    g_text(6, y + 20, &FONT_T, "TIGHT: SOONER, BUT A BUSY BLOCK DROPS OUT.", C_DIM);
+    g_text(6, y + 20, &FONT_T, "TIGHT: SOONER; A BUSY BLOCK DROPS OUT", C_DIM);
     g_text(6, y + 36, &FONT_T, "SCREEN 1 FPS AND GUARD OFF ARE TESTS:", C_DIM);
     g_text(6, y + 46, &FONT_T, "WATCH RENDER AND XRUNS ON THE CPU PAGE.", C_DIM);
     g_text(6, y + 62, &FONT_T, "CORE TEST: THE SAME WORK ON EACH CORE", C_DIM);
@@ -6198,7 +6459,7 @@ static __attribute__((noinline)) void pic_weftrate(void)
         if (on)
             g_rbox(6, y, 228, 40, 5, C_WHITE, 0);
         g_text(14, y + 6, &FONT_B, i ? "HALF" : "FULL", on ? C_WHITE : C_MID);
-        g_text(80, y + 6, &FONT_T, i ? "22 KHZ: ABOUT HALF THE TIME" : "44.1 KHZ: AS IT WAS MADE", on ? C_INK : C_DIM);
+        g_text(80, y + 6, &FONT_T, i ? "22 KHZ: HALF THE TIME" : "44.1 KHZ: AS IT WAS MADE", on ? C_INK : C_DIM);
         g_text(80, y + 22, &FONT_T, i ? "TOP OCTAVE GONE, SOME GRIT" : "EVERY BLOCK, EVERY SAMPLE", on ? C_INK : C_DIM);
     }
     b[0] = 0;
@@ -6598,77 +6859,147 @@ static void pic_lane(void)
     }
 }
 
+/* the notes a step plays: its own and its chord's (up to four); returns how many */
+static int step_notes(const rv_step *s, int *nt)
+{
+    int n = 0, i;
+    if (!(s->flags & ST_ON) || (s->flags & ST_JUMP))
+        return 0;
+    nt[n++] = s->note;
+    for (i = 0; i < 3; i++)
+        if (s->chord[i])
+            nt[n++] = s->note + s->chord[i];
+    return n;
+}
+
+/* a tap on a step key, on the grid's note: put the note in (a step with notes already makes a chord) or take it out */
+static void step_toggle_note(rv_step *s, int note)
+{
+    int nt[4], n = step_notes(s, nt), i, j = 0, base;
+    if (!n) {
+        s->note = (uint8_t)note;
+        s->chord[0] = s->chord[1] = s->chord[2] = 0;
+        s->flags = (uint8_t)((s->flags | ST_ON) & ~ST_JUMP);
+        if (!s->vel)
+            s->vel = 100;
+        return;
+    }
+    for (i = 0; i < n; i++)
+        if (nt[i] == note)
+            break;
+    if (i < n) {                                      /* there: out */
+        for (; i + 1 < n; i++)
+            nt[i] = nt[i + 1];
+        n--;
+    } else if (n < 4) {
+        nt[n++] = note;
+    } else {
+        nt[3] = note;                                 /* (full: the last note is swapped) */
+    }
+    if (!n) {
+        s->flags &= (uint8_t)~ST_ON;
+        s->chord[0] = s->chord[1] = s->chord[2] = 0;
+        return;
+    }
+    base = nt[0];
+    s->note = (uint8_t)base;
+    for (i = 1; i < n; i++)
+        s->chord[j++] = (int8_t)(nt[i] - base ? nt[i] - base : 0);
+    while (j < 3)
+        s->chord[j++] = 0;
+}
+
+#define NG_ROWS 8
+#define NG_Y 22
+#define NG_RH 11
 static void pic_steps(void)
 {
-    int t = ui.track, len = clampi(rv.tp[t][TP_LEN], 1, 64), i, play = rv_live.step[t][0], play2 = rv_live.step[t][1];
+    int t = ui.track, len = clampi(rv.tp[t][TP_LEN], 1, 64), i, c, r, play = rv_live.step[t][0], play2 = rv_live.step[t][1];
     const rv_pattern *p = &rv.pat[t][rv.pat_cur[t] % RV_PATTERNS];
+    int pages_n = (len + 15) / 16, cur_note = 60 + ui.ng_n, nrow = 0, rows[NG_ROWS + 1], seen[128 / 32] = {0, 0, 0, 0}, top, cr = -1;
+    uint16_t kc = kind_dcol(t), lt = g_mix(kc, C_INK, 0.55f);
     char b[8];
-    /* the 64-step overview */
-    for (i = 0; i < 64; i++) {
-        int x = 8 + (i % 16) * 14 + (i / 16) * 0, y = PIC_Y + 2 + (i / 16) * 6;
-        uint16_t c = i >= len ? C_BG : (p->s[i].flags & ST_ON) ? kind_dcol(t) : C_LINE;
-        if (i / 16 == ui.step_page && i < len)
-            c = (p->s[i].flags & ST_ON) ? g_mix(kind_dcol(t), C_INK, 0.5f) : C_DIM;
-        if (i == play)
-            c = C_WHITE;
-        if (i == rv_live.srec_step && ui.srec_t == t)
-            c = C_RED;
-        g_rbox(x, y, 12, 3, 1, c, 1);
+    /* the notes with a hit anywhere in the pattern: only they get a row (high at the top) */
+    for (i = 0; i < len; i++) {
+        int nt[4], n = step_notes(&p->s[i], nt), k;
+        for (k = 0; k < n; k++)
+            if (nt[k] >= 0 && nt[k] < 128)
+                seen[nt[k] >> 5] |= 1 << (nt[k] & 31);
     }
-    /* the 16 keys' steps, large */
-    for (i = 0; i < 16; i++) {
-        int si = ui.step_page * 16 + i, x = 8 + (i % 8) * 28, y = PIC_Y + 30 + (i / 8) * 46;
-        const rv_step *s = &p->s[si];
-        uint16_t lt = g_mix(kind_dcol(t), C_INK, 0.55f);
-        if (si >= len)
-            continue;
-        if (s->flags & ST_ON)                         /* a step that plays: filled in the track's colour */
-            g_rbox(x, y, 25, 42, 4, kind_dcol(t), 1);
+    seen[cur_note >> 5] |= 1 << (cur_note & 31);      /* (and the note on the knob, so you can see where a tap lands) */
+    for (i = 127; i >= 0; i--)
+        if (seen[i >> 5] & (1 << (i & 31)))
+            rows[nrow++] = i;
+    for (r = 0; r < nrow; r++)
+        if (rows[r] == cur_note)
+            cr = r;
+    top = clampi(cr - NG_ROWS / 2, 0, nrow > NG_ROWS ? nrow - NG_ROWS : 0);   /* (more notes than room: the rows scroll with the knob) */
+    /* the page icon: one small tile for each 16 steps, the page on the screen filled */
+    for (i = 0; i < pages_n; i++) {
+        int x = 2 + i * 7;
+        if (i == ui.step_page)
+            g_rbox(x, PIC_Y + 4, 5, 8, 1, C_K1, 1);
         else
-            g_rbox(x, y, 25, 42, 4, C_LINE, 0);
-        if (si == play || si == play2)
-            g_rbox(x, y, 25, 42, 4, C_WHITE, 0);
-        if (ui.srec_t == t && si == rv_live.srec_step) {   /* step recording: the next note goes here */
-            g_rbox(x - 2, y - 2, 29, 46, 5, C_RED, 0);
-            g_rbox(x - 1, y - 1, 27, 44, 5, C_RED, 0);
-        } else if (si == ui.step_cur)                 /* the step the knobs edit: ringed in KNOB 1's colour */
-            g_rbox(x - 2, y - 2, 29, 46, 5, C_K1, 0);
-        if (s->flags & ST_ON) {
-            int vh = s->vel * 20 / 127;
-            if (s->flags & ST_JUMP) {
-                sx_cat(b, "");
-                b[0] = 'J';
-                sx_int(b + 1, s->note + 1);
-            } else {
-                sx_note(b, s->note);
-            }
-            g_text_c(x + 13, y + 3, &FONT_T, b, C_INK);
-            if (!(s->flags & ST_JUMP) && (s->chord[0] || s->chord[1] || s->chord[2])) {   /* a chord: how many notes */
-                int nn = 1 + (s->chord[0] != 0) + (s->chord[1] != 0) + (s->chord[2] != 0);
-                char cb[4] = {'X', (char)('0' + nn), 0, 0};
-                g_text_c(x + 13, y + 12, &FONT_T, cb, C_TEAL);
-            }
-            g_rbox(x + 4, y + 38 - vh, 2, vh > 2 ? vh : 2, 1, lt, 1);   /* its velocity */
-            if (s->lp[0] || s->lp[1])
-                g_fill(x + 20, y + 16, 3, 3, C_AMBER);
-            if (s->ratchet & 7) {
-                int r;
-                for (r = 0; r <= (s->ratchet & 7); r++)
-                    g_vline(x + 10 + r * 2, y + 30, 6, C_INK);
-            }
-            if (s->micro)
-                g_hline(x + 13 + s->micro, y + 40, 3, C_AMBER);
-            if (s->chance < 100)
-                g_text(x + 9, y + 18, &FONT_T, "%", C_MID);
-            if (s->env)
-                g_fill(x + 20, y + 22, 3, 3, C_TEAL);
-            if (s->cut & 3)
-                g_fill(x + 20, y + 28, 3, 3, C_RED);
-        }
-        sx_int(b, si + 1);
-        if (!(s->flags & ST_ON))
-            g_text_c(x + 13, y + 14, &FONT_T, b, C_DIM);
+            g_rbox(x, PIC_Y + 4, 5, 8, 1, C_DIM, 0);
     }
+    /* step numbers over the columns, the playing step lit */
+    for (c = 0; c < 16; c++) {
+        int si = ui.step_page * 16 + c, x = 30 + c * 13;
+        if (si >= len)
+            break;
+        if (si == play || si == play2)
+            g_fill(x, PIC_Y + 15, 12, 2, C_WHITE);
+        else if (si == ui.step_cur)
+            g_fill(x, PIC_Y + 15, 12, 2, C_K1);
+        else if (c % 4 == 0)
+            g_fill(x, PIC_Y + 15, 12, 1, C_DIM);
+        if (c % 4 == 0) {
+            sx_int(b, si + 1);
+            g_text(x + (si + 1 > 9 ? 0 : 3), PIC_Y + 4, &FONT_T, b, C_DIM);
+        }
+    }
+    for (r = 0; r < NG_ROWS && top + r < nrow; r++) {
+        int note = rows[top + r], y = PIC_Y + NG_Y + r * NG_RH, hit = note != cur_note || 0, k;
+        int played = 0;
+        for (i = 0; i < len && !played; i++) {
+            int nt[4], n = step_notes(&p->s[i], nt);
+            for (k = 0; k < n; k++)
+                if (nt[k] == note)
+                    played = 1;
+        }
+        (void)hit;
+        sx_note(b, note);                             /* the note's name, on the left */
+        g_text(2, y + 1, &FONT_T, b, note == cur_note ? C_K2 : played ? C_INK : C_DIM);
+        if (!played) {                                /* the note on the knob, not played yet: just a line to place it on */
+            g_hline(30, y + NG_RH / 2, 208, C_LINE);
+            if (note == cur_note && ui.step_cur / 16 == ui.step_page)
+                g_rbox(30 + (ui.step_cur % 16) * 13 - 1, y, 14, NG_RH - 1, 2, C_K1, 0);
+            continue;
+        }
+        for (c = 0; c < 16; c++) {
+            int si = ui.step_page * 16 + c, x = 30 + c * 13, nt[4], n, on = 0;
+            const rv_step *s;
+            if (si >= len)
+                break;
+            s = &p->s[si];
+            n = step_notes(s, nt);
+            for (k = 0; k < n; k++)
+                if (nt[k] == note)
+                    on = 1;
+            if (on) {
+                int vh = 3 + s->vel * (NG_RH - 5) / 127;   /* the velocity, as the cell's height */
+                g_rbox(x, y + (NG_RH - 1 - vh) / 2, 12, vh, 1, si == play ? C_WHITE : kc, 1);
+                if (s->flags & ST_TIE)
+                    g_fill(x + 12, y + NG_RH / 2 - 1, 1, 2, lt);
+            } else {
+                g_rbox(x, y + 1, 12, NG_RH - 3, 1, C_LINE, 0);
+            }
+            if (si == ui.step_cur && note == cur_note)   /* the cell on the knobs: ringed in KNOB 1's colour */
+                g_rbox(x - 1, y, 14, NG_RH - 1, 2, C_K1, 0);
+        }
+    }
+    if (!nrow)
+        g_text_c(120, PIC_Y + 60, &FONT_T, "TURN KNOB 2 TO A NOTE", C_DIM);
     {
         char pb[24] = "PATTERN ";
         pb[8] = (char)('A' + rv.pat_cur[t] % RV_PATTERNS);
@@ -6839,7 +7170,7 @@ static void pic_mutes(void)
         meter_bar(x + 9, y + 38, 10, 40, out ? 0.0f : fm_sqrtf(rv_live.meter[t]), C_LINE, fc);
         g_text_c(x + 14, y + 84, &FONT_T, muted ? "MUTE" : solo ? "SOLO" : out ? "-" : "ON", muted ? C_RED : solo ? C_TRIG : fc);
     }
-    g_text(6, PIC_Y + 106, &FONT_T, "WHITE 1-8: MUTE   9-16 (OR GLO+1-8): SOLO", C_DIM);
+    g_text(6, PIC_Y + 106, &FONT_T, "WHITE 1-8 MUTE  9-16 SOLO (OR GLO+1-8)", C_DIM);
     g_text(6, PIC_Y + 118, &FONT_T, "BLACK 1: ALL ON   BLACK 2: SOLO OFF", C_DIM);
 }
 
@@ -6955,7 +7286,7 @@ static void pic_save(void)
         b[k] = 0;
         x = 132 + g_text_w(&FONT_XS, b);
         g_fill(x, PIC_Y + 25, 7, 2, C_AMBER);
-        g_text(132, PIC_Y + 34, &FONT_T, "2: CURSOR  3: LETTER", C_DIM);
+        g_text(132, PIC_Y + 34, &FONT_T, "2:CURSOR 3:LETTER", C_DIM);
         if (ui.room >= 0) {                           /* the flash: how much room the projects have left */
             b[0] = 0;
             sx_int(b + sx_cat(b, "ROOM "), ui.room);
@@ -7194,7 +7525,7 @@ static void draw_help(void)
     g_text(6, y, &FONT_T, "KEYS", C_MID);
     g_text(64, y, &FONT_T, seq && !seq_keys_play(ui.track) ? (kit ? "STEPS, THE LANE CHOSEN" : "STEPS (HOLD + KNOB: A LOCK)")
                            : seq ? "PLAY AND RECORD NOTES" : pg->pic == PIC_SCENES ? "LAUNCH SCENES"
-                           : pg->pic == PIC_MUTES ? "1-8 MUTE, 9-16 SOLO THE TRACKS" : "PLAY THE TRACK", C_INK);
+                           : pg->pic == PIC_MUTES ? "1-8 MUTE, 9-16 SOLO" : "PLAY THE TRACK", C_INK);
     y += 12;
     g_text(6, y, &FONT_T, "OCT", C_MID);
     g_text(64, y, &FONT_T, ui.srec_t >= 0 ? "+ A REST, - BACK A STEP" : seq && !seq_keys_play(ui.track) ? "THE KEYS' STEPS 1-16 .. 49-64" : "THE KEYS' OCTAVE", C_INK);

@@ -38,6 +38,7 @@
  *   expect wsetting T N V | matset K N | lockset T S N   a WEFT setting's value; which setting a matrix row / lock names
  *   expect soundused N K          the bank's slot N holds a sound of kind K (-1: empty)
  *   expect gp NAME VALUE          a global parameter
+ *   expect px X Y R G B | has R G B   the screen's pixel X,Y is that colour (8-bit channels, as RGB565 holds them) | some pixel is
  *   expect page TITLE             the page on screen
  *   expect store SLOT FILE        the storage slot holds just that file
  *   expect msg TEXT               the message on the top line now ("" when none)
@@ -86,6 +87,7 @@ extern uint32_t rv_dbg_ons[RV_TRACKS];
 void rv_bank_reload(int slot);
 void rv_weft_preset(int t, int k);
 void rv_weft_block_defaults(int t, int i);
+#include "demo_fixtures.c"   /* (the demo songs the scenarios start from: not in the firmware any more) */
 
 /* ----------------------------------------------------------- input --- */
 static int16_t *in_pcm;
@@ -503,10 +505,10 @@ int main(int argc, char **argv)
                 return 2;
             }
             rv.tp[(tt - 1) & 7][pp] = (int16_t)vv;
-        } else if (!strcmp(a, "demo")) {      /* demo 1|2|3, as SAVE > DEMO 1-3 */
+        } else if (!strcmp(a, "demo")) {      /* demo 1|2|3: the fixture songs of host/demo_fixtures.c */
             int d = atoi(b);
             rv_transport(0);
-            rv_demo(d == 3 ? 3 : d == 2 ? 1 : 0);
+            rv_demo_fixture(d == 3 ? 3 : d == 2 ? 1 : 0);
         } else if (!strcmp(a, "midi")) {      /* midi b0 b1 b2 (hex): a message in, as from USB or the jack */
             void host_midi_push(int x, int y, int z);
             unsigned x = 0, y = 0, z = 0;
@@ -579,6 +581,31 @@ int main(int argc, char **argv)
                     fails++;
                 }
                 continue;
+            } else if (!strcmp(b, "px") || !strcmp(b, "has")) {   /* px X Y R G B: that pixel; has R G B: some pixel, of the screen now */
+                int px = !strcmp(b, "px"), x = 0, y = 0, r = 0, g = 0, bl = 0, n;
+                unsigned want, hit = 0, i;
+                if (px)
+                    n = sscanf(line, "%*s %*s %d %d %d %d %d", &x, &y, &r, &g, &bl) == 5;
+                else
+                    n = sscanf(line, "%*s %*s %d %d %d", &r, &g, &bl) == 3;
+                if (!n) {
+                    fprintf(stderr, "line %d: expect %s %s\n", lineno, b, px ? "X Y R G B" : "R G B");
+                    return 2;
+                }
+                want = (unsigned)(((r >> 3) << 11) | ((g >> 2) << 5) | (bl >> 3));
+                if (px)
+                    hit = x >= 0 && x < PLAT_W && y >= 0 && y < PLAT_H && fb[y * PLAT_W + x] == want;
+                else
+                    for (i = 0; i < (unsigned)(PLAT_W * PLAT_H) && !hit; i++)
+                        hit = fb[i] == want;
+                if (!hit) {
+                    if (px)
+                        printf("FAIL line %d: pixel %d,%d is %04x, expected %04x\n", lineno, x, y, x >= 0 && x < PLAT_W && y >= 0 && y < PLAT_H ? fb[y * PLAT_W + x] : 0, want);
+                    else
+                        printf("FAIL line %d: no pixel of colour %04x on the screen\n", lineno, want);
+                    fails++;
+                }
+                continue;
             } else if (!strcmp(b, "page")) {
                 char title[64];
                 sscanf(line, "%*s %*s %63[^\n]", title);
@@ -621,6 +648,11 @@ int main(int argc, char **argv)
                 int tt = atoi(w1) - 1;
                 const rv_step *ss = &rv.pat[tt & 7][rv.pat_cur[tt & 7] % RV_PATTERNS].s[(atoi(w2) - 1) & (RV_STEPS - 1)];
                 got = (ss->flags & ST_ON) ? ss->note : -1;
+                want = atoi(w3);
+            } else if (!strcmp(b, "stepnotes")) {            /* track T's step S: how many notes it plays (its chord's, too) */
+                int tt = atoi(w1) - 1;
+                const rv_step *ss = &rv.pat[tt & 7][rv.pat_cur[tt & 7] % RV_PATTERNS].s[(atoi(w2) - 1) & (RV_STEPS - 1)];
+                got = (ss->flags & ST_ON) ? 1 + (ss->chord[0] != 0) + (ss->chord[1] != 0) + (ss->chord[2] != 0) : 0;
                 want = atoi(w3);
             } else if (!strcmp(b, "stepvel")) {              /* track T's step S: its velocity (on or off) */
                 int tt = atoi(w1) - 1;

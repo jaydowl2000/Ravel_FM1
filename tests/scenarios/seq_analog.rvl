@@ -92,7 +92,7 @@ wait 100
 expect page ANALOG
 turn SELECT 1
 wait 100
-expect page TEMPO
+expect page STEP FEEL
 turn SELECT -1
 wait 100
 expect page ANALOG

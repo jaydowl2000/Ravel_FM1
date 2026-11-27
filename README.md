@@ -204,7 +204,7 @@ Knobs speed up when you turn them quickly, so a fast turn crosses a whole range 
 
 - a VA synth has three SOURCE pages, FM has four;
 - the graph's HEAD pages only appear when the track is in GRAPH mode, and HEAD 2's pages only when head 2 is on;
-- in CHANCE mode, the CHANCE pages take the place of the step pages (STEPS, TEMPO, STEP TIMING, STEP SHAPE, STEP CUT, DIRECTION, EUCLID).
+- in CHANCE mode, the CHANCE pages take the place of the step pages (STEPS, STEP FEEL, STEP TIMING, STEP SHAPE, STEP CUT, DIRECTION, EUCLID).
 
 So if a page seems to be "skipped", it is hidden because it does not apply to this track. Change the track or the setting and it comes back.
 
@@ -939,6 +939,8 @@ A PERC track starts as a **KIT**: six **lanes**, each its own machine with its o
 - **RATE** is the lane's own speed against the track's: X1/4, X1/3, X1/2, X2/3, TRK (the track's), X3/2, X2, X3 or X4. A hat at X2 runs through its steps twice as fast as the kick (sixteenths over eighths, or 32nds as rolls); a lane at X2/3 or X3/2 plays triplets against straight steps; X1/2 stretches a lane's pattern over twice the time. Each lane keeps its own place, wrapping at its own LENGTH, and its hits fall between the track's steps where the rate puts them. Lanes at a rate of their own play forward. The DRUM page marks a lane's rate under its name when it isn't TRK.
 - **Shared by the whole kit:** EDIT › **KIT FX** (AMD, AMF, EQF, EQG) and **KIT FILTER** (FLTF, FLTW, FLTQ), SKIN (DEREZ is the Machinedrum's SRR), INSERT, MIX and SENDS. A kit has no PITCH or synth FILTER page: each machine has its own pitch and tone.
 
+**The note grid.** On a note track SEQ > STEPS is drawn like a drum sequencer: sixteen steps across and, down the left, one row for each note that has a hit, high notes at the top. There is no grid until a note is played; the note on knob 2 is shown as one empty row, so you can see where a tap lands. Knob 1 is the STEP (across), knob 2 the NOTE (C-1 to G9, starting on C4), knob 3 that step's LENGTH, knob 4 its VELO. A tap on a step key puts knob 2's note into that step, or takes it out; a second note on a step makes a chord (up to four). SELECT turns to **STEP FEEL**: RATE (the track's division), MICRO (nudge), RATCHET and TIE. OCT- and OCT+ turn the pages of sixteen steps (the little tiles at the top left show which page you are on), and knob 1 moves to the page's first step. The ANALOG view (SEQ again on STEPS) still sets notes with the faders. TEMPO and SWING stay on GLO > CLOCK.
+
 **SEQ is the drum sequencer**, and the only place the lanes are drawn as steps. On a kit track SEQ opens on the **DRUM** page instead of STEPS: all six lanes over sixteen steps, the chosen lane in red, accents white, ratchets marked above, locked steps marked with a dot, each lane's playhead in teal. The note pages (STEPS, STEP SHAPE, the graphs) are hidden on a kit, since a drum hit has no note or length. Every kit SEQ page draws the lanes: STEP TIMING keeps MICRO, R CURVE and CONDITN (a step's timing is shared by the lanes on it), and TRACK keeps MODE (STEPS or CHAIN, below), LENGTH, RATE and CLOCK. A kit's ratchets are set per lane on DRUM STEP only.
 
 - **In SEQ, black keys 3–8 choose the lane** you are sequencing, and **the white keys are its sixteen steps**: one tap puts a hit there, the next tap clears it (and its locks). OCT- and OCT+ page through longer patterns.
@@ -1416,7 +1418,7 @@ The picture is the six lanes round an oval with their cords; the chosen lane's c
 | **CPU** | CORES: 2 (the default) gives the FM-1's second core the effects and every other voice; 1 turns it off (see below) | FLASH WT: OFF, or ON to count how much of the render waits for its code to come from the flash | VIEW: PARTS (the render's parts) or TRACKS (each track's cost) | SILENT: SKIP (the default) or PLAY: whether the voices of a track you can't hear stop (SKIP SILENT, below) | – |
 | **STRESS** | STEP: OFF, or 1–16, each adding load to the last (below) | ENGINE: the synth engine the voices use | AUTO: RUN walks the steps, three seconds each, and fills in the table | – | – |
 | **FLASH** | – (read only: how the boot set the flash up) | | | | – |
-| **PANEL** | BACKLIGHT: OFF, LOW (the default), MID, HIGH: how brightly the unlit buttons and keys glow, on the FM-1 | START WITH: **LAST** (the default: at power-on, the project you last saved or loaded) or **BLANK** | – | – | – |
+| **PANEL** | BACKLIGHT: OFF, LOW (the default), MID, HIGH: how brightly the unlit buttons and keys glow, on the FM-1 | START WITH: **LAST** (the default: at power-on, the project you last saved or loaded) or **BLANK** | THEME: **DARK** (the default) or **LIGHT** | ACCENT: **BONE** (the default), **BLUE**, **GREEN** or **PURPLE** | – |
 
 <p align="center"><img src="docs/manual/song-cpu.png" alt="CPU" width="240"> <img src="docs/manual/song-stress.png" alt="STRESS" width="240"></p>
 <p align="center"><sub>(Taken on the desktop simulator, a far faster machine: the same project reads many times higher on the FM-1.)</sub></p>
@@ -1451,6 +1453,8 @@ Grains already playing finish as they were, and sounding WEFT voices play on: no
 - The learned controls, like MIDI IN's settings and the backlight, belong to the FM-1, not to a project: they stay through power-off and whatever you load.
 
 **PANEL.** The FM-1's buttons and keys glow dimly, so you can find them in the dark; what's lit (the page's button, a step, a key held) stays lit fully, so the two never get mixed up. BACKLIGHT sets how dim: OFF, LOW, MID or HIGH. The glow comes from the panel's own scanning (each unlit LED is lit on one scan in a few), so it costs the sound nothing and the keys are read as before. It's kept through power-off.
+
+**THEME and ACCENT.** DARK is the black Ravel has always had. LIGHT turns the greys over (dark ink on a white ground, the same contrasts) and deepens the accent colours so they read on white. ACCENT sets the two highlight colours, the playhead's and the second one's: BONE (the default), BLUE, GREEN or PURPLE. The track kinds keep their own colours (the red of recording, the maroon of PERC, and so on). Both change at once as you turn the knob, and are kept through power-off with the other PANEL settings.
 
 **START WITH.** On **LAST** (the default), switching on opens the project you last saved or loaded, and says so ("OPENED 3 MYSONG"); on **BLANK** it starts on a new project, as before. You still save as you go: it opens the project as you last saved it, not what you had when you switched off. Clearing that slot means a blank start. If the FM-1 reset while Ravel was running (a crash, a hang, an update), the next start is blank ("AFTER A RESET: NEW PROJECT"), so a project it can't open can never stop it starting; switch off and on to open it again.
 
@@ -1628,6 +1632,7 @@ Hold a button (in the emulator: right-click or shift-click to latch it) and the 
 | **REC** | SEQ | The SEQ pages' keys play notes (not recording), or are steps again |
 | **REC** | SAVE | TAKE: the last loop you played goes into the steps (on a CHANCE page: the phrase does) |
 | **REC** | OCT− / OCT+ | On a CHANCE page: a new phrase / three steps decided again |
+| **EDIT** | OCT− / OCT+ | Undo / redo the last change to the steps or the sound on screen, in the order you made them (a recording pass, a step edit, a lock, a EUCLID write, a paste or a clear is one change; so is a sweep of a knob, or a jump of ALGORITHM, which can move many values at once). The sound is the track's parameters and the song's FX (delay, space, bed), and only what you turn a knob or PRESETS for counts: a scene, a macro or the matrix moving a value is not an edit. Kept: the last 64 changed steps and the last 160 changed values; a new project starts afresh. Not covered: a pattern's length, kit locks and lanes, CZ envelopes, WEFT patches, other tracks |
 
 <p align="center"><img src="docs/manual/hold-seq.png" alt="SEQ held: steps on any page" width="240"> <img src="docs/manual/hold-fx.png" alt="FX held: the punch-ins" width="240"></p>
 
@@ -1875,7 +1880,7 @@ High chances on a lane's cord to itself make it run on (hats); a cord at 10–20
 2. Connect the FM-1, switched on, directly to the computer with a USB data cable.
 3. Press **Install**, allow MIDI when the browser asks, and wait until it says it is done. Don't unplug part way. The FM-1 restarts into Ravel.
 
-The installer page shows the latest release at the top and installs it unless you choose otherwise: its **Version to install** list also has the ten most recent releases (an older one warns that projects saved with a newer version may not open in it, so export them first) and, when `main` has moved on since the last release, the newest **test build** (`dev-` and the commit, with its date). The Install button names the version it writes. The FM-1 shows the version it runs on its start screen (small, bottom right) and on GLO › FLASH.
+The installer page shows the latest release at the top and installs it unless you choose otherwise: its **Version to install** list also has the ten most recent releases (an older one warns that projects saved with a newer version may not open in it, so export them first) and, when `main` has moved on since the last release, the newest **test build** (`dev-` and the commit, with its date). The Install button names the version it writes. The FM-1 shows the version it runs on GLO › FLASH (this fork has no start screen: its room went to undo).
 
 From the command line instead (`pip3 install mido python-rtmidi`): `python3 tools/fm1_install.py Ravel-FM1.fwsc`. The `.fwsc` is on the site (`firmware/Ravel-FM1.fwsc`) and on the repository's releases.
 

@@ -23,46 +23,132 @@ static int g_cx0 = 0, g_cx1 = PLAT_W;   /* a clip across (the start screen's mel
 
 #define RGB(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
 /* a deep black ground, quiet greys, light ink; teal for live movement, amber for memory and the tape */
-#define C_BG RGB(3, 3, 3)
-#define C_PANEL RGB(17, 17, 17)
-#define C_LINE RGB(36, 36, 36)
-#define C_DIM RGB(92, 92, 92)
-#define C_MID RGB(152, 152, 152)
-#define C_INK RGB(232, 232, 230)
-#define C_WHITE RGB(255, 255, 255)
-/* the four knobs' colours: the part of a drawing a knob moves is drawn in its colour */
-#define C_KPANEL RGB(10, 10, 10)            /* the knob strip: a shade off black, with grain */
-#define C_KDIV RGB(58, 58, 58)              /* its dividers, one between each physical knob */
-#define C_KTRACK RGB(34, 34, 34)            /* a knob bar's empty track on the strip */
-#define C_KOFF RGB(66, 66, 66)              /* a greyed knob's name and value on the strip */
-#define C_K1 RGB(236, 236, 234)            /* the knobs: white down through the greys */
-#define C_K2 RGB(196, 196, 196)
-#define C_K3 RGB(156, 156, 156)
-#define C_K4 RGB(118, 118, 118)
-/* the perc tracks keep the earlier greens (their lanes and machines are drawn as they were) */
-#define C_O_PANEL RGB(28, 35, 31)
-#define C_O_LINE RGB(48, 58, 52)
-#define C_O_DIM RGB(86, 100, 91)
-#define C_O_MID RGB(140, 153, 143)
-/* the track kinds' badges: the colours they always had, deeper */
-#define C_SYNTH_D RGB(58, 58, 58)
-#define C_STRIKE_D RGB(40, 48, 58)
-#define C_TAPE_D RGB(38, 56, 48)
-#define C_PERC_D RGB(72, 16, 24)
-#define C_AMBER RGB(104, 146, 128)          /* the second accent: verdigris */
-#define C_AMBER_D RGB(40, 56, 49)
-#define C_TEAL RGB(222, 210, 184)           /* the first accent: bone */
-#define C_TEAL_D RGB(84, 80, 70)
-#define C_RED RGB(170, 44, 54)
-#define C_TRIG RGB(226, 214, 190)
-#define C_EXC RGB(112, 130, 152)
-#define C_CLOCK RGB(170, 170, 170)
-#define C_RING RGB(100, 100, 100)
-#define C_SPARK RGB(190, 150, 104)          /* SPARK: a brass tap */
-#define C_SYNTH RGB(232, 232, 230)
-#define C_STRIKE RGB(112, 130, 152)
-#define C_TAPE RGB(104, 146, 128)
-#define C_PERC RGB(131, 28, 41)            /* a deep, dark maroon */
+/* THEMES. Every colour the UI draws with is one of these entries (C_xxx reads th_c[]), filled by theme_apply() from
+ * GLO > PANEL: THEME (DARK or LIGHT) and ACCENT (BONE, BLUE, GREEN or PURPLE), kept with the FM-1's other settings.
+ * th_dark[] is the palette Ravel always had. LIGHT turns the greys over (white on black becomes black on white, the
+ * same contrasts), the dim washes of the track kinds become tints of their colours, and the accents (the first and
+ * second colour, the trigger colour) come from th_acc[], deeper so they read on white. The track kinds' own colours
+ * (red, the strike blue-grey, tape green, perc maroon) are the same in both. The screen is painted afresh every
+ * frame, so a change shows at once. */
+enum {
+    TC_BG, TC_PANEL, TC_LINE, TC_DIM, TC_MID, TC_INK, TC_WHITE, TC_KPANEL, TC_KDIV, TC_KTRACK, TC_KOFF, TC_K1, TC_K2, TC_K3, TC_K4, TC_O_PANEL, TC_O_LINE, TC_O_DIM, TC_O_MID, TC_SYNTH_D, TC_CLOCK, TC_RING, TC_SYNTH, TC_RED, TC_EXC, TC_SPARK, TC_STRIKE, TC_TAPE, TC_PERC, TC_STRIKE_D, TC_TAPE_D, TC_PERC_D, TC_TEAL, TC_TEAL_D, TC_AMBER, TC_AMBER_D, TC_TRIG, TC_N
+};
+#define TC_NINV 23                          /* the first TC_NINV entries are the greys that turn over in LIGHT */
+static const uint16_t th_dark[TC_N] = {
+    RGB(3, 3, 3), /* BG */
+    RGB(17, 17, 17), /* PANEL */
+    RGB(36, 36, 36), /* LINE */
+    RGB(92, 92, 92), /* DIM */
+    RGB(152, 152, 152), /* MID */
+    RGB(232, 232, 230), /* INK */
+    RGB(255, 255, 255), /* WHITE */
+    RGB(10, 10, 10), /* KPANEL the knob strip: a shade off black, with grain */
+    RGB(58, 58, 58), /* KDIV its dividers, one between each physical knob */
+    RGB(34, 34, 34), /* KTRACK a knob bar's empty track on the strip */
+    RGB(66, 66, 66), /* KOFF a greyed knob's name and value on the strip */
+    RGB(236, 236, 234), /* K1 the knobs: white down through the greys */
+    RGB(196, 196, 196), /* K2 */
+    RGB(156, 156, 156), /* K3 */
+    RGB(118, 118, 118), /* K4 */
+    RGB(28, 35, 31), /* O_PANEL */
+    RGB(48, 58, 52), /* O_LINE */
+    RGB(86, 100, 91), /* O_DIM */
+    RGB(140, 153, 143), /* O_MID */
+    RGB(58, 58, 58), /* SYNTH_D */
+    RGB(170, 170, 170), /* CLOCK */
+    RGB(100, 100, 100), /* RING */
+    RGB(232, 232, 230), /* SYNTH */
+    RGB(170, 44, 54), /* RED */
+    RGB(112, 130, 152), /* EXC */
+    RGB(190, 150, 104), /* SPARK SPARK: a brass tap */
+    RGB(112, 130, 152), /* STRIKE */
+    RGB(104, 146, 128), /* TAPE */
+    RGB(131, 28, 41), /* PERC a deep, dark maroon */
+    RGB(40, 48, 58), /* STRIKE_D */
+    RGB(38, 56, 48), /* TAPE_D */
+    RGB(72, 16, 24), /* PERC_D */
+    RGB(222, 210, 184), /* TEAL the first accent: bone */
+    RGB(84, 80, 70), /* TEAL_D */
+    RGB(104, 146, 128), /* AMBER the second accent: verdigris */
+    RGB(40, 56, 49), /* AMBER_D */
+    RGB(226, 214, 190), /* TRIG */
+};
+/* the accents, per ACCENT (BONE, BLUE, GREEN, PURPLE) and mode (DARK, LIGHT): TEAL, TEAL_D, AMBER, AMBER_D, TRIG */
+static const uint16_t th_acc[4][2][5] = {
+    {{RGB(222, 210, 184), RGB(84, 80, 70), RGB(104, 146, 128), RGB(40, 56, 49), RGB(226, 214, 190)},
+     {RGB(140, 104, 40), RGB(232, 224, 206), RGB(40, 110, 86), RGB(206, 230, 220), RGB(150, 112, 48)}},
+    {{RGB(110, 168, 255), RGB(30, 48, 78), RGB(110, 200, 210), RGB(28, 56, 60), RGB(150, 190, 255)},
+     {RGB(24, 96, 200), RGB(206, 224, 250), RGB(0, 128, 148), RGB(200, 236, 240), RGB(40, 110, 210)}},
+    {{RGB(110, 214, 140), RGB(30, 66, 42), RGB(176, 212, 112), RGB(52, 60, 28), RGB(150, 230, 170)},
+     {RGB(22, 128, 60), RGB(208, 238, 216), RGB(96, 128, 20), RGB(230, 238, 200), RGB(30, 140, 70)}},
+    {{RGB(178, 140, 255), RGB(52, 36, 84), RGB(232, 140, 214), RGB(66, 36, 60), RGB(200, 170, 255)},
+     {RGB(110, 56, 200), RGB(226, 214, 248), RGB(176, 40, 140), RGB(246, 214, 236), RGB(120, 70, 210)}},
+};
+static uint16_t th_c[TC_N];
+
+#define C_BG th_c[TC_BG]
+#define C_PANEL th_c[TC_PANEL]
+#define C_LINE th_c[TC_LINE]
+#define C_DIM th_c[TC_DIM]
+#define C_MID th_c[TC_MID]
+#define C_INK th_c[TC_INK]
+#define C_WHITE th_c[TC_WHITE]
+#define C_KPANEL th_c[TC_KPANEL]
+#define C_KDIV th_c[TC_KDIV]
+#define C_KTRACK th_c[TC_KTRACK]
+#define C_KOFF th_c[TC_KOFF]
+#define C_K1 th_c[TC_K1]
+#define C_K2 th_c[TC_K2]
+#define C_K3 th_c[TC_K3]
+#define C_K4 th_c[TC_K4]
+#define C_O_PANEL th_c[TC_O_PANEL]
+#define C_O_LINE th_c[TC_O_LINE]
+#define C_O_DIM th_c[TC_O_DIM]
+#define C_O_MID th_c[TC_O_MID]
+#define C_SYNTH_D th_c[TC_SYNTH_D]
+#define C_CLOCK th_c[TC_CLOCK]
+#define C_RING th_c[TC_RING]
+#define C_SYNTH th_c[TC_SYNTH]
+#define C_RED th_c[TC_RED]
+#define C_EXC th_c[TC_EXC]
+#define C_SPARK th_c[TC_SPARK]
+#define C_STRIKE th_c[TC_STRIKE]
+#define C_TAPE th_c[TC_TAPE]
+#define C_PERC th_c[TC_PERC]
+#define C_STRIKE_D th_c[TC_STRIKE_D]
+#define C_TAPE_D th_c[TC_TAPE_D]
+#define C_PERC_D th_c[TC_PERC_D]
+#define C_TEAL th_c[TC_TEAL]
+#define C_TEAL_D th_c[TC_TEAL_D]
+#define C_AMBER th_c[TC_AMBER]
+#define C_AMBER_D th_c[TC_AMBER_D]
+#define C_TRIG th_c[TC_TRIG]
+
+static uint16_t th_tint(uint16_t c)                  /* c, seven eighths of the way to white */
+{
+    int r = c >> 11, g = (c >> 5) & 63, b = c & 31;
+    r += (31 - r) * 7 >> 3;
+    g += (63 - g) * 7 >> 3;
+    b += (31 - b) * 7 >> 3;
+    return (uint16_t)(r << 11 | g << 5 | b);
+}
+
+static void theme_apply(int light, int accent)
+{
+    int i;
+    light &= 1;
+    for (i = 0; i < TC_N; i++)
+        th_c[i] = th_dark[i];
+    if (light) {
+        for (i = 0; i < TC_NINV; i++)
+            th_c[i] = (uint16_t)~th_dark[i];
+        th_c[TC_STRIKE_D] = th_tint(th_dark[TC_STRIKE]);
+        th_c[TC_TAPE_D] = th_tint(th_dark[TC_TAPE]);
+        th_c[TC_PERC_D] = th_tint(th_dark[TC_PERC]);
+    }
+    for (i = 0; i < 5; i++)
+        th_c[TC_TEAL + i] = th_acc[accent & 3][light][i];
+}
 
 static void g_band(int y0)
 {

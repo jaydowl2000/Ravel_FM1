@@ -1,0 +1,142 @@
+# THEME and ACCENT (GLO > PANEL): DARK or LIGHT, and BONE / BLUE / GREEN / PURPLE; kept through power-off
+# (the ground is checked on PANEL, the accent on SEQ > STEPS while a song plays: the playhead is drawn in it)
+wait 300
+demo 1
+wait 300
+tap PLAY
+wait 1500
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# the default: DARK, BONE (the near-black ground Ravel always had; bone for the first accent)
+expect px 230 120 3 3 3
+tap SEQ
+wait 200
+expect has 222 210 184
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# LIGHT: the greys turn over (a white ground), the accent deeper so it reads on white
+turn K3 1
+wait 200
+expect px 230 120 255 255 255
+tap SEQ
+wait 200
+expect has 140 104 40
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# ACCENT BLUE: in LIGHT
+turn K4 1
+wait 200
+tap SEQ
+wait 200
+expect has 24 96 200
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# ACCENT GREEN: in LIGHT
+turn K4 1
+wait 200
+tap SEQ
+wait 200
+expect has 22 128 60
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# ACCENT PURPLE: in LIGHT
+turn K4 1
+wait 200
+tap SEQ
+wait 200
+expect has 110 56 200
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# and in DARK
+turn K3 -1
+wait 200
+expect px 230 120 3 3 3
+tap SEQ
+wait 200
+expect has 178 140 255
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+turn K4 -1
+wait 200
+tap SEQ
+wait 200
+expect has 110 214 140
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+turn K4 -1
+wait 200
+tap SEQ
+wait 200
+expect has 110 168 255
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# kept through power-off: LIGHT and GREEN now, then reboot
+turn K3 1
+turn K4 1
+wait 2500
+reboot
+wait 300
+demo 1
+wait 300
+tap PLAY
+wait 1500
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+expect px 230 120 255 255 255
+tap SEQ
+wait 200
+expect has 22 128 60
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+# back to DARK and BONE
+turn K3 -1
+turn K4 -3
+wait 2500
+reboot
+wait 300
+demo 1
+wait 300
+tap PLAY
+wait 1500
+tap GLO
+turn SELECT -40
+turn SELECT 60
+wait 200
+expect page PANEL
+expect px 230 120 3 3 3
+tap SEQ
+wait 200
+expect has 222 210 184

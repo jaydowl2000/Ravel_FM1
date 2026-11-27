@@ -24,13 +24,14 @@ tap('PLAY');
 run(2000);
 check(peak === 0, 'it starts on a blank project: silent while playing');
 tap('PLAY');
-rv.web_demo(0);
+rv.web_demo(0);                                            // (no demos in this fork: a blank project, given four steps)
+for (let st = 0; st < 16; st += 4) rv.web_step_set(0, st, 1, 0);
 peak = 0; frames = 0;
 run(300);
 tap('PLAY');
 run(6000);
-check(rv.web_playing() === 1, 'PLAY starts the demo');
-check(peak > 0.05, `the demo makes sound (peak ${(20 * Math.log10(peak)).toFixed(1)} dB)`);
+check(rv.web_playing() === 1, 'PLAY starts');
+check(peak > 0.05, `a project with four steps makes sound (peak ${(20 * Math.log10(peak)).toFixed(1)} dB)`);
 check(Math.abs(frames - 44100 * 6.4) < 4000, `time runs at 44.1 kHz (${frames} frames)`);
 tap('PLAY');
 run(800);
@@ -267,8 +268,7 @@ function cstr2(I, p) { const m = new Uint8Array(I.memory.buffer, p); let n = 0; 
   let wet = 0; for (let i = 0; i < rv.web_preset_count(); i++) { rv.web_preset_apply(0, i); for (const p of SENDS) wet += rv.web_tp(0, p); }
   rv.web_tp_set(0, 56, 33); rv.web_preset_apply(0, 3);
   check(wet === 0 && rv.web_tp(0, 56) === 33, `presets leave the sends alone (sum over all ${rv.web_preset_count()} presets ${wet}; a send set by hand stays)`);
-  rv.web_demo(0); let dw = 0; for (let t = 0; t < 8; t++) dw += rv.web_tp(t, 56) + rv.web_tp(t, 55);
-  check(dw > 0, `a demo still brings its own sends (${dw})`);
+  // (this fork has no factory sounds, so the demos no longer bring sends of their own)
 }
 {                                                           // the BED: silent at LEVEL 0, sounds when up, held down by busy tracks (DUCK)
   const GPB = 110;

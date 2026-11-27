@@ -1,0 +1,98 @@
+# UNDO / REDO: EDIT + OCT- undoes the last change to the steps on screen, EDIT + OCT+ redoes it.
+# One gesture (changes less than 0.7 s apart) is one undo.
+wait 300
+clear 1
+wait 300
+expect steps 1 0
+# nothing to undo yet
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect msg NOTHING TO UNDO
+wait 1500
+# two separate edits
+press SEQ
+tapkey 0
+release SEQ
+wait 900
+expect steps 1 1
+press SEQ
+tapkey 2
+release SEQ
+wait 900
+expect steps 1 2
+# undo the second, then the first
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect steps 1 1
+expect msg UNDO
+wait 200
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect steps 1 0
+wait 200
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect steps 1 0
+expect msg NOTHING TO UNDO
+wait 1500
+# redo both, then nothing more to redo
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect steps 1 1
+expect msg REDO
+wait 200
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect steps 1 2
+wait 200
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect steps 1 2
+expect msg NOTHING TO REDO
+wait 1500
+# a new edit after an undo drops what could be redone
+press EDIT
+tap OCT-
+release EDIT
+wait 900
+expect steps 1 1
+press SEQ
+tapkey 4
+release SEQ
+wait 900
+expect steps 1 2
+press EDIT
+tap OCT+
+release EDIT
+wait 50
+expect steps 1 2
+expect msg NOTHING TO REDO
+wait 1500
+# two steps within one gesture are one undo
+press SEQ
+tapkey 6
+tapkey 7
+release SEQ
+wait 900
+expect steps 1 4
+press EDIT
+tap OCT-
+release EDIT
+wait 50
+expect steps 1 2
+# a step's own settings come back too (velocity)
+expect stepvel 1 1 100
