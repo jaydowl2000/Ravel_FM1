@@ -1,0 +1,491 @@
+From b7e3368ea457152b07d7d349fc811ce86c18366c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 26 Nov 2026 18:44:26 -0500
+Subject: [PATCH] Note grid: drum-style STEPS page (only played notes get a
+ row), STEP/NOTE/LENGTH/VELO knobs, STEP FEEL page, page tiles
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01D9SdYPAdNjNvqzL7Cw33Mg
+---
+ README.md                      |   4 +-
+ firmware/app/rv_ui.c           | 234 +++++++++++++++++++++++----------
+ host/ravel_host.c              |   5 +
+ tests/scenarios/manual.rvl     |   4 +-
+ tests/scenarios/notegrid.rvl   |  67 ++++++++++
+ tests/scenarios/seq_analog.rvl |   2 +-
+ 6 files changed, 243 insertions(+), 73 deletions(-)
+ create mode 100644 tests/scenarios/notegrid.rvl
+
+diff --git a/README.md b/README.md
+index fab6750..1e65242 100644
+--- a/README.md
++++ b/README.md
+@@ -204,7 +204,7 @@ Knobs speed up when you turn them quickly, so a fast turn crosses a whole range
+ 
+ - a VA synth has three SOURCE pages, FM has four;
+ - the graph's HEAD pages only appear when the track is in GRAPH mode, and HEAD 2's pages only when head 2 is on;
+-- in CHANCE mode, the CHANCE pages take the place of the step pages (STEPS, TEMPO, STEP TIMING, STEP SHAPE, STEP CUT, DIRECTION, EUCLID).
++- in CHANCE mode, the CHANCE pages take the place of the step pages (STEPS, STEP FEEL, STEP TIMING, STEP SHAPE, STEP CUT, DIRECTION, EUCLID).
+ 
+ So if a page seems to be "skipped", it is hidden because it does not apply to this track. Change the track or the setting and it comes back.
+ 
+@@ -939,6 +939,8 @@ A PERC track starts as a **KIT**: six **lanes**, each its own machine with its o
+ - **RATE** is the lane's own speed against the track's: X1/4, X1/3, X1/2, X2/3, TRK (the track's), X3/2, X2, X3 or X4. A hat at X2 runs through its steps twice as fast as the kick (sixteenths over eighths, or 32nds as rolls); a lane at X2/3 or X3/2 plays triplets against straight steps; X1/2 stretches a lane's pattern over twice the time. Each lane keeps its own place, wrapping at its own LENGTH, and its hits fall between the track's steps where the rate puts them. Lanes at a rate of their own play forward. The DRUM page marks a lane's rate under its name when it isn't TRK.
+ - **Shared by the whole kit:** EDIT › **KIT FX** (AMD, AMF, EQF, EQG) and **KIT FILTER** (FLTF, FLTW, FLTQ), SKIN (DEREZ is the Machinedrum's SRR), INSERT, MIX and SENDS. A kit has no PITCH or synth FILTER page: each machine has its own pitch and tone.
+ 
++**The note grid.** On a note track SEQ > STEPS is drawn like a drum sequencer: sixteen steps across and, down the left, one row for each note that has a hit, high notes at the top. There is no grid until a note is played; the note on knob 2 is shown as one empty row, so you can see where a tap lands. Knob 1 is the STEP (across), knob 2 the NOTE (C-1 to G9, starting on C4), knob 3 that step's LENGTH, knob 4 its VELO. A tap on a step key puts knob 2's note into that step, or takes it out; a second note on a step makes a chord (up to four). SELECT turns to **STEP FEEL**: RATE (the track's division), MICRO (nudge), RATCHET and TIE. OCT- and OCT+ turn the pages of sixteen steps (the little tiles at the top left show which page you are on), and knob 1 moves to the page's first step. The ANALOG view (SEQ again on STEPS) still sets notes with the faders. TEMPO and SWING stay on GLO > CLOCK.
++
+ **SEQ is the drum sequencer**, and the only place the lanes are drawn as steps. On a kit track SEQ opens on the **DRUM** page instead of STEPS: all six lanes over sixteen steps, the chosen lane in red, accents white, ratchets marked above, locked steps marked with a dot, each lane's playhead in teal. The note pages (STEPS, STEP SHAPE, the graphs) are hidden on a kit, since a drum hit has no note or length. Every kit SEQ page draws the lanes: STEP TIMING keeps MICRO, R CURVE and CONDITN (a step's timing is shared by the lanes on it), and TRACK keeps MODE (STEPS or CHAIN, below), LENGTH, RATE and CLOCK. A kit's ratchets are set per lane on DRUM STEP only.
+ 
+ - **In SEQ, black keys 3–8 choose the lane** you are sequencing, and **the white keys are its sixteen steps**: one tap puts a hit there, the next tap clears it (and its locks). OCT- and OCT+ page through longer patterns.
+diff --git a/firmware/app/rv_ui.c b/firmware/app/rv_ui.c
+index ab99864..40c0682 100644
+--- a/firmware/app/rv_ui.c
++++ b/firmware/app/rv_ui.c
+@@ -191,8 +191,8 @@ static const page_t pages[] = {
+     {SEC_SEQ, V_CHANCE, PIC_CHANCE, PR_NONE, "CHANCE", {TP(TP_H1ROLE), TP(TP_H1SHAPE), TP(TP_H1DEPTH), TP(TP_H1CYCLE)}},
+     {SEC_SEQ, V_CHANCE, PIC_CHANCE, PR_NONE, "CHANCE SHAPE", {TP(TP_H1COMB), TP(TP_H1TRANS), TP(TP_H2TARGET), TP(TP_H2SHAPE)}},
+     {SEC_SEQ, V_CHANCE, PIC_CHANCE, PR_NONE, "CHANCE MORE", {TP(TP_H2DEPTH), TP(TP_H2CYCLE), TP(TP_H2COMB), TP(TP_H2TRANS)}},
+-    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEPS", {SF(SF_NOTE), SF(SF_VEL), SF(SF_LEN), SF(SF_CHANCE)}},
+-    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_PATTERN, "TEMPO", {GP(GP_TEMPO), GP(GP_SWING), TP(TP_LEN), TP(TP_RATE)}},   /* (the same TEMPO and SWING as GLO > CLOCK) */
++    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEPS", {{K_LRN, 8}, {K_LRN, 9}, SF(SF_LEN), SF(SF_VEL)}},   /* STEP across, NOTE up and down; the grid shows the notes that have a hit */
++    {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEP FEEL", {TP(TP_RATE), SF(SF_MICRO), SF(SF_RATCHET), SF(SF_TIE)}},   /* RATE: the track's division (TEMPO and SWING stay on GLO > CLOCK) */
+     {SEC_SEQ, V_KIT, PIC_DRUM, PR_PATTERN, "TEMPO", {GP(GP_TEMPO), GP(GP_SWING), TP(TP_LEN), TP(TP_RATE)}},
+     {SEC_SEQ, V_NOTCH, PIC_STEPS, PR_STEP, "STEP TIMING", {SF(SF_MICRO), SF(SF_RATCHET), SF(SF_RCURVE), SF(SF_COND)}},
+     {SEC_SEQ, V_KITSTEPS, PIC_DRUM, PR_STEP, "STEP TIMING", {SF(SF_MICRO), SF(SF_RCURVE), SF(SF_COND), SF(SF_RMOVE)}},
+@@ -243,6 +243,7 @@ static struct {
+     uint8_t layer_used[NB];
+     uint8_t step_page;                       /* SEQ: which 16 steps the keys show */
+     int16_t step_cur;                        /* the step the step pages edit */
++    int8_t ng_n;                             /* the note grid's row: the note, in semitones from C4 (60), C-1 to G9 */
+     uint8_t cz_row;                          /* the CZ envelope pages: stages 1-2, 3-4, 5-6, 7-8, or SUS and END (OCT) */
+     uint8_t lane[RV_TRACKS];                 /* each KIT track's chosen lane */
+     uint8_t lane_row;                        /* the LANE pages: which row of the lane's settings the knobs hold */
+@@ -686,6 +687,8 @@ static kb_t page_knob(const page_t *pg, int i)
+ }
+ 
+ static int note_track_ui(int t);
++static void step_toggle_note(rv_step *s, int note);
++static int analog_on(void);
+ /* ANALOG: the STEPS page seen as an analog sequencer (SEQ on STEPS turns it on and off): 16 pitch faders over gate
+  * faders and on/off switches, the knobs on four at a time (SELECT: which four), a step held: its GATE (velocity) */
+ static int analog_on(void);
+@@ -1362,10 +1365,15 @@ static RV_SMALL kinfo_t kb_info(kb_t k)
+     case K_LRN: {
+         static const char *const ln[] = {"OFF", "ARMED", "ARMED"}, *const one[] = {"TURN"};
+         static const char *const bl[] = {"OFF", "LOW", "MID", "HIGH"}, *const st[] = {"NEXT", "STAY"};
+-        static const char *const kn[] = {"LEARN", "DELETE", "CLEAR ALL", "BACKLIGHT", "STEP REC", "START WITH", "THEME", "ACCENT"}, *const sw[] = {"LAST", "BLANK"};
++        static const char *const kn[] = {"LEARN", "DELETE", "CLEAR ALL", "BACKLIGHT", "STEP REC", "START WITH", "THEME", "ACCENT", "STEP", "NOTE"}, *const sw[] = {"LAST", "BLANK"};
+         static const char *const tm[] = {"DARK", "LIGHT"}, *const ac[] = {"BONE", "BLUE", "GREEN", "PURPLE"};
+-        r.name = kn[k.id < 8 ? k.id : 0];
++        r.name = kn[k.id < 10 ? k.id : 0];
+         r.fmt = PF_ENUM;
++        if (k.id >= 8) {                          /* the note grid: STEP (1 to 64) and NOTE (C-1 to G9) */
++            r.fmt = k.id == 8 ? PF_NUM : PF_NOTE;
++            r.max = k.id == 8 ? 63 : 127;
++            break;
++        }
+         r.max = k.id == 0 ? 2 : k.id == 3 || k.id == 7 ? 3 : k.id >= 4 && k.id <= 6 ? 1 : 0;
+         r.names = k.id == 0 ? ln : k.id == 3 ? bl : k.id == 4 ? st : k.id == 5 ? sw : k.id == 6 ? tm : k.id == 7 ? ac : one;
+         break;
+@@ -1596,7 +1604,7 @@ static RV_SMALL int kb_get(kb_t k)
+         }
+     }
+     case K_LRN:
+-        return k.id == 0 ? learn : k.id == 3 ? prefs_back_get() : k.id == 4 ? prefs_stay() : k.id == 5 ? prefs.start & 1 : k.id == 6 ? prefs.theme & 1 : k.id == 7 ? (prefs.theme >> 1) & 3 : 0;
++        return k.id == 0 ? learn : k.id == 3 ? prefs_back_get() : k.id == 4 ? prefs_stay() : k.id == 5 ? prefs.start & 1 : k.id == 6 ? prefs.theme & 1 : k.id == 7 ? (prefs.theme >> 1) & 3 : k.id == 8 ? ui.step_cur : k.id == 9 ? 60 + ui.ng_n : 0;
+     case K_WF: {
+         const rv_weft *w = &rv.weft[ui.track];
+         int b = ui.wf_blk % WF_BLOCKS;
+@@ -2196,6 +2204,13 @@ static RV_SMALL void kb_format(kb_t k, int v, char *o)
+         rv_param_format(PID_G(k.id), v, o, 12);
+         return;
+     }
++    if (k.kind == K_LRN && k.id >= 8) {
++        if (k.id == 8)
++            sx_int(o, v + 1);
++        else
++            sx_note(o, v);
++        return;
++    }
+     if ((k.kind == K_STEP && k.id == SF_NOTE) || (k.kind == K_ANA && held_step() < 0)) {
+         sx_note(o, v);
+         return;
+@@ -3155,10 +3170,12 @@ static void key_event(int k, int on)
+                             rv_kitlock_clear(t, rv.pat_cur[t] % RV_PATTERNS, ui.step_page * 16 + wi, ui.lane[t] % RV_LANES);
+                         }
+                         s->flags = (uint8_t)(s->note & 63 ? s->flags | ST_ON : s->flags & ~ST_ON);
+-                    } else {
++                    } else if (analog_on()) {                 /* the ANALOG view: a tap on or off, the faders set the notes */
+                         s->flags ^= ST_ON;
+                         if ((s->flags & ST_ON) && s->vel == 0)
+                             s->vel = 100;
++                    } else {
++                        step_toggle_note(s, 60 + ui.ng_n);   /* the grid: a tap puts the knob's note in, or takes it out */
+                     }
+                 }
+                 return;
+@@ -3511,7 +3528,7 @@ static void buttons(uint32_t now_btn)
+     if (down & (1u << B_OCTDN)) {
+         if ((ui.sec == SEC_SEQ || (now_btn & (1u << B_SEQ))) && !seq_keys_play(ui.track)) {
+             ui.step_page = (uint8_t)(ui.step_page ? ui.step_page - 1 : 0);
+-            if (cur_page()->pr == PR_STEPCUR)         /* the graph: the knobs go to the page's first step */
++            if (cur_page()->pr == PR_STEPCUR || cur_page()->pr == PR_STEP)   /* the graph and the grid: the knobs go to the page's first step */
+                 ui.step_cur = (int16_t)(ui.step_page * 16);
+         }
+         else if (ui.octave > -3)
+@@ -3522,7 +3539,7 @@ static void buttons(uint32_t now_btn)
+             int pages_n = (clampi(rv.tp[ui.track][TP_LEN], 1, 64) + 15) / 16;
+             if (ui.step_page + 1 < pages_n) {
+                 ui.step_page++;
+-                if (cur_page()->pr == PR_STEPCUR)
++                if (cur_page()->pr == PR_STEPCUR || cur_page()->pr == PR_STEP)
+                     ui.step_cur = (int16_t)(ui.step_page * 16);
+             }
+         } else if (ui.octave < 3)
+@@ -3770,6 +3787,15 @@ static void learn_knob_any(int kind, int id)          /* learning, and a knob tu
+ }
+ static void lrn_turn(int id, int d)                   /* MIDI LEARN's knobs: LEARN, DELETE, CLEAR ALL; PANEL's BACKLIGHT */
+ {
++    if (id == 8) {                                    /* STEPS: the step on the knobs, across (the keys' page follows) */
++        ui.step_cur = (int16_t)clampi(ui.step_cur + d, 0, clampi(rv.tp[ui.track][TP_LEN], 1, 64) - 1);
++        ui.step_page = (uint8_t)(ui.step_cur / 16);
++        return;
++    }
++    if (id == 9) {                                    /* STEPS: the note (row) on the knobs, up and down the keyboard */
++        ui.ng_n = (int8_t)clampi(ui.ng_n + d, -60, 67);
++        return;
++    }
+     if (id == 3) {
+         prefs.back = (uint8_t)((clampi(prefs_back() + d, 0, 3) + 1) | (prefs.back & 0x80));
+         prefs_touch();
+@@ -6726,77 +6752,147 @@ static void pic_lane(void)
+     }
+ }
+ 
++/* the notes a step plays: its own and its chord's (up to four); returns how many */
++static int step_notes(const rv_step *s, int *nt)
++{
++    int n = 0, i;
++    if (!(s->flags & ST_ON) || (s->flags & ST_JUMP))
++        return 0;
++    nt[n++] = s->note;
++    for (i = 0; i < 3; i++)
++        if (s->chord[i])
++            nt[n++] = s->note + s->chord[i];
++    return n;
++}
++
++/* a tap on a step key, on the grid's note: put the note in (a step with notes already makes a chord) or take it out */
++static void step_toggle_note(rv_step *s, int note)
++{
++    int nt[4], n = step_notes(s, nt), i, j = 0, base;
++    if (!n) {
++        s->note = (uint8_t)note;
++        s->chord[0] = s->chord[1] = s->chord[2] = 0;
++        s->flags = (uint8_t)((s->flags | ST_ON) & ~ST_JUMP);
++        if (!s->vel)
++            s->vel = 100;
++        return;
++    }
++    for (i = 0; i < n; i++)
++        if (nt[i] == note)
++            break;
++    if (i < n) {                                      /* there: out */
++        for (; i + 1 < n; i++)
++            nt[i] = nt[i + 1];
++        n--;
++    } else if (n < 4) {
++        nt[n++] = note;
++    } else {
++        nt[3] = note;                                 /* (full: the last note is swapped) */
++    }
++    if (!n) {
++        s->flags &= (uint8_t)~ST_ON;
++        s->chord[0] = s->chord[1] = s->chord[2] = 0;
++        return;
++    }
++    base = nt[0];
++    s->note = (uint8_t)base;
++    for (i = 1; i < n; i++)
++        s->chord[j++] = (int8_t)(nt[i] - base ? nt[i] - base : 0);
++    while (j < 3)
++        s->chord[j++] = 0;
++}
++
++#define NG_ROWS 8
++#define NG_Y 22
++#define NG_RH 11
+ static void pic_steps(void)
+ {
+-    int t = ui.track, len = clampi(rv.tp[t][TP_LEN], 1, 64), i, play = rv_live.step[t][0], play2 = rv_live.step[t][1];
++    int t = ui.track, len = clampi(rv.tp[t][TP_LEN], 1, 64), i, c, r, play = rv_live.step[t][0], play2 = rv_live.step[t][1];
+     const rv_pattern *p = &rv.pat[t][rv.pat_cur[t] % RV_PATTERNS];
++    int pages_n = (len + 15) / 16, cur_note = 60 + ui.ng_n, nrow = 0, rows[NG_ROWS + 1], seen[128 / 32] = {0, 0, 0, 0}, top, cr = -1;
++    uint16_t kc = kind_dcol(t), lt = g_mix(kc, C_INK, 0.55f);
+     char b[8];
+-    /* the 64-step overview */
+-    for (i = 0; i < 64; i++) {
+-        int x = 8 + (i % 16) * 14 + (i / 16) * 0, y = PIC_Y + 2 + (i / 16) * 6;
+-        uint16_t c = i >= len ? C_BG : (p->s[i].flags & ST_ON) ? kind_dcol(t) : C_LINE;
+-        if (i / 16 == ui.step_page && i < len)
+-            c = (p->s[i].flags & ST_ON) ? g_mix(kind_dcol(t), C_INK, 0.5f) : C_DIM;
+-        if (i == play)
+-            c = C_WHITE;
+-        if (i == rv_live.srec_step && ui.srec_t == t)
+-            c = C_RED;
+-        g_rbox(x, y, 12, 3, 1, c, 1);
++    /* the notes with a hit anywhere in the pattern: only they get a row (high at the top) */
++    for (i = 0; i < len; i++) {
++        int nt[4], n = step_notes(&p->s[i], nt), k;
++        for (k = 0; k < n; k++)
++            if (nt[k] >= 0 && nt[k] < 128)
++                seen[nt[k] >> 5] |= 1 << (nt[k] & 31);
++    }
++    seen[cur_note >> 5] |= 1 << (cur_note & 31);      /* (and the note on the knob, so you can see where a tap lands) */
++    for (i = 127; i >= 0; i--)
++        if (seen[i >> 5] & (1 << (i & 31)))
++            rows[nrow++] = i;
++    for (r = 0; r < nrow; r++)
++        if (rows[r] == cur_note)
++            cr = r;
++    top = clampi(cr - NG_ROWS / 2, 0, nrow > NG_ROWS ? nrow - NG_ROWS : 0);   /* (more notes than room: the rows scroll with the knob) */
++    /* the page icon: one small tile for each 16 steps, the page on the screen filled */
++    for (i = 0; i < pages_n; i++) {
++        int x = 2 + i * 7;
++        if (i == ui.step_page)
++            g_rbox(x, PIC_Y + 4, 5, 8, 1, C_K1, 1);
++        else
++            g_rbox(x, PIC_Y + 4, 5, 8, 1, C_DIM, 0);
+     }
+-    /* the 16 keys' steps, large */
+-    for (i = 0; i < 16; i++) {
+-        int si = ui.step_page * 16 + i, x = 8 + (i % 8) * 28, y = PIC_Y + 30 + (i / 8) * 46;
+-        const rv_step *s = &p->s[si];
+-        uint16_t lt = g_mix(kind_dcol(t), C_INK, 0.55f);
++    /* step numbers over the columns, the playing step lit */
++    for (c = 0; c < 16; c++) {
++        int si = ui.step_page * 16 + c, x = 30 + c * 13;
+         if (si >= len)
+-            continue;
+-        if (s->flags & ST_ON)                         /* a step that plays: filled in the track's colour */
+-            g_rbox(x, y, 25, 42, 4, kind_dcol(t), 1);
+-        else
+-            g_rbox(x, y, 25, 42, 4, C_LINE, 0);
++            break;
+         if (si == play || si == play2)
+-            g_rbox(x, y, 25, 42, 4, C_WHITE, 0);
+-        if (ui.srec_t == t && si == rv_live.srec_step) {   /* step recording: the next note goes here */
+-            g_rbox(x - 2, y - 2, 29, 46, 5, C_RED, 0);
+-            g_rbox(x - 1, y - 1, 27, 44, 5, C_RED, 0);
+-        } else if (si == ui.step_cur)                 /* the step the knobs edit: ringed in KNOB 1's colour */
+-            g_rbox(x - 2, y - 2, 29, 46, 5, C_K1, 0);
+-        if (s->flags & ST_ON) {
+-            int vh = s->vel * 20 / 127;
+-            if (s->flags & ST_JUMP) {
+-                sx_cat(b, "");
+-                b[0] = 'J';
+-                sx_int(b + 1, s->note + 1);
++            g_fill(x, PIC_Y + 15, 12, 2, C_WHITE);
++        else if (si == ui.step_cur)
++            g_fill(x, PIC_Y + 15, 12, 2, C_K1);
++        else if (c % 4 == 0)
++            g_fill(x, PIC_Y + 15, 12, 1, C_DIM);
++        if (c % 4 == 0) {
++            sx_int(b, si + 1);
++            g_text(x + (si + 1 > 9 ? 0 : 3), PIC_Y + 4, &FONT_T, b, C_DIM);
++        }
++    }
++    for (r = 0; r < NG_ROWS && top + r < nrow; r++) {
++        int note = rows[top + r], y = PIC_Y + NG_Y + r * NG_RH, hit = note != cur_note || 0, k;
++        int played = 0;
++        for (i = 0; i < len && !played; i++) {
++            int nt[4], n = step_notes(&p->s[i], nt);
++            for (k = 0; k < n; k++)
++                if (nt[k] == note)
++                    played = 1;
++        }
++        (void)hit;
++        sx_note(b, note);                             /* the note's name, on the left */
++        g_text(2, y + 1, &FONT_T, b, note == cur_note ? C_K2 : played ? C_INK : C_DIM);
++        if (!played) {                                /* the note on the knob, not played yet: just a line to place it on */
++            g_hline(30, y + NG_RH / 2, 208, C_LINE);
++            if (note == cur_note && ui.step_cur / 16 == ui.step_page)
++                g_rbox(30 + (ui.step_cur % 16) * 13 - 1, y, 14, NG_RH - 1, 2, C_K1, 0);
++            continue;
++        }
++        for (c = 0; c < 16; c++) {
++            int si = ui.step_page * 16 + c, x = 30 + c * 13, nt[4], n, on = 0;
++            const rv_step *s;
++            if (si >= len)
++                break;
++            s = &p->s[si];
++            n = step_notes(s, nt);
++            for (k = 0; k < n; k++)
++                if (nt[k] == note)
++                    on = 1;
++            if (on) {
++                int vh = 3 + s->vel * (NG_RH - 5) / 127;   /* the velocity, as the cell's height */
++                g_rbox(x, y + (NG_RH - 1 - vh) / 2, 12, vh, 1, si == play ? C_WHITE : kc, 1);
++                if (s->flags & ST_TIE)
++                    g_fill(x + 12, y + NG_RH / 2 - 1, 1, 2, lt);
+             } else {
+-                sx_note(b, s->note);
+-            }
+-            g_text_c(x + 13, y + 3, &FONT_T, b, C_INK);
+-            if (!(s->flags & ST_JUMP) && (s->chord[0] || s->chord[1] || s->chord[2])) {   /* a chord: how many notes */
+-                int nn = 1 + (s->chord[0] != 0) + (s->chord[1] != 0) + (s->chord[2] != 0);
+-                char cb[4] = {'X', (char)('0' + nn), 0, 0};
+-                g_text_c(x + 13, y + 12, &FONT_T, cb, C_TEAL);
++                g_rbox(x, y + 1, 12, NG_RH - 3, 1, C_LINE, 0);
+             }
+-            g_rbox(x + 4, y + 38 - vh, 2, vh > 2 ? vh : 2, 1, lt, 1);   /* its velocity */
+-            if (s->lp[0] || s->lp[1])
+-                g_fill(x + 20, y + 16, 3, 3, C_AMBER);
+-            if (s->ratchet & 7) {
+-                int r;
+-                for (r = 0; r <= (s->ratchet & 7); r++)
+-                    g_vline(x + 10 + r * 2, y + 30, 6, C_INK);
+-            }
+-            if (s->micro)
+-                g_hline(x + 13 + s->micro, y + 40, 3, C_AMBER);
+-            if (s->chance < 100)
+-                g_text(x + 9, y + 18, &FONT_T, "%", C_MID);
+-            if (s->env)
+-                g_fill(x + 20, y + 22, 3, 3, C_TEAL);
+-            if (s->cut & 3)
+-                g_fill(x + 20, y + 28, 3, 3, C_RED);
+-        }
+-        sx_int(b, si + 1);
+-        if (!(s->flags & ST_ON))
+-            g_text_c(x + 13, y + 14, &FONT_T, b, C_DIM);
++            if (si == ui.step_cur && note == cur_note)   /* the cell on the knobs: ringed in KNOB 1's colour */
++                g_rbox(x - 1, y, 14, NG_RH - 1, 2, C_K1, 0);
++        }
+     }
++    if (!nrow)
++        g_text_c(120, PIC_Y + 60, &FONT_T, "TURN KNOB 2 TO A NOTE", C_DIM);
+     {
+         char pb[24] = "PATTERN ";
+         pb[8] = (char)('A' + rv.pat_cur[t] % RV_PATTERNS);
+diff --git a/host/ravel_host.c b/host/ravel_host.c
+index 0ce1a9d..059e74f 100644
+--- a/host/ravel_host.c
++++ b/host/ravel_host.c
+@@ -649,6 +649,11 @@ int main(int argc, char **argv)
+                 const rv_step *ss = &rv.pat[tt & 7][rv.pat_cur[tt & 7] % RV_PATTERNS].s[(atoi(w2) - 1) & (RV_STEPS - 1)];
+                 got = (ss->flags & ST_ON) ? ss->note : -1;
+                 want = atoi(w3);
++            } else if (!strcmp(b, "stepnotes")) {            /* track T's step S: how many notes it plays (its chord's, too) */
++                int tt = atoi(w1) - 1;
++                const rv_step *ss = &rv.pat[tt & 7][rv.pat_cur[tt & 7] % RV_PATTERNS].s[(atoi(w2) - 1) & (RV_STEPS - 1)];
++                got = (ss->flags & ST_ON) ? 1 + (ss->chord[0] != 0) + (ss->chord[1] != 0) + (ss->chord[2] != 0) : 0;
++                want = atoi(w3);
+             } else if (!strcmp(b, "stepvel")) {              /* track T's step S: its velocity (on or off) */
+                 int tt = atoi(w1) - 1;
+                 got = rv.pat[tt & 7][rv.pat_cur[tt & 7] % RV_PATTERNS].s[(atoi(w2) - 1) & (RV_STEPS - 1)].vel;
+diff --git a/tests/scenarios/manual.rvl b/tests/scenarios/manual.rvl
+index cfb935d..ffe5f0c 100644
+--- a/tests/scenarios/manual.rvl
++++ b/tests/scenarios/manual.rvl
+@@ -169,9 +169,9 @@ shot seq-steps.png
+ turn SELECT -20
+ turn SELECT 1
+ wait 150
+-expect page TEMPO
++expect page STEP FEEL
+ wait 600
+-shot seq-tempo.png
++shot seq-feel.png
+ tap SEQ
+ turn SELECT -20
+ turn SELECT 2
+diff --git a/tests/scenarios/notegrid.rvl b/tests/scenarios/notegrid.rvl
+new file mode 100644
+index 0000000..6674d3c
+--- /dev/null
++++ b/tests/scenarios/notegrid.rvl
+@@ -0,0 +1,67 @@
++# THE NOTE GRID (SEQ > STEPS on a note track): knob 1 the step, knob 2 the note (C-1 to G9, starts on C4),
++# a tap on a step key puts the knob's note in that step or takes it out; a second note on a step is a chord.
++wait 300
++clear 1
++wait 300
++press SEQ
++release SEQ
++wait 300
++expect page STEPS
++expect steps 1 0
++# C4 in step 1
++tapkey 0
++wait 100
++expect stepnote 1 1 60
++expect steps 1 1
++# knob 2 up four: E4 into step 2, and into step 1 too (a chord of two)
++turn K2 4
++tapkey 2
++wait 100
++expect stepnote 1 2 64
++tapkey 0
++wait 100
++expect stepnotes 1 1 2
++expect stepnote 1 1 60
++# E4 out of step 1 again: back to one note
++tapkey 0
++wait 100
++expect stepnotes 1 1 1
++# C4 out of step 1: the step is off
++turn K2 -4
++tapkey 0
++wait 100
++expect steps 1 1
++expect stepnote 1 1 -1
++# knob 1 moves across the steps, knob 2 clamps at the ends of the keyboard
++turn K1 5
++wait 100
++expect stepcur 6
++turn K2 -100
++turn K2 -100
++turn K2 200
++turn K2 200
++tapkey 4
++wait 100
++expect stepnote 1 3 127
++# velocity and length are knobs 4 and 3 of the same page
++turn K1 -10
++turn K1 2
++wait 60
++turn K4 -1
++wait 60
++expect stepvel 1 3 99
++# OCT+ and OCT- turn the 16-step pages, and the knobs go to the page's first step
++settp 1 LENGTH 40
++wait 100
++press OCT+
++release OCT+
++wait 100
++expect stepcur 17
++press OCT+
++release OCT+
++wait 100
++expect stepcur 33
++press OCT-
++release OCT-
++wait 100
++expect stepcur 17
+diff --git a/tests/scenarios/seq_analog.rvl b/tests/scenarios/seq_analog.rvl
+index 1955804..938d0ba 100644
+--- a/tests/scenarios/seq_analog.rvl
++++ b/tests/scenarios/seq_analog.rvl
+@@ -92,7 +92,7 @@ wait 100
+ expect page ANALOG
+ turn SELECT 1
+ wait 100
+-expect page TEMPO
++expect page STEP FEEL
+ turn SELECT -1
+ wait 100
+ expect page ANALOG
+-- 
+2.43.0
+
